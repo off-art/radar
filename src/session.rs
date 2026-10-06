@@ -71,6 +71,32 @@ pub fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+/// Ищет команду так, как её найдёт запускаемый агент: через login+interactive shell
+/// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полный путь.
+pub fn find_binary(bin: &str) -> Option<String> {
+    if bin == "$SHELL" {
+        return Some(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    std::process::Command::new(shell)
+        .args(["-l", "-i", "-c", &format!("command -v {}", shq(bin))])
+        .env("SHELL_SESSIONS_DISABLE", "1")
+        .env_remove("TERM_SESSION_ID")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        // шелл может напечатать приветствие — путь всегда в последней строке
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(str::trim)
+                .rfind(|l| l.starts_with('/'))
+                .map(str::to_string)
+        })
+}
+
 fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }

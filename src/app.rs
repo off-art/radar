@@ -20,10 +20,14 @@ use crossterm::execute;
 use ratatui::layout::Rect;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub struct NewForm {
+    /// Индекс в `cfg.agents`.
     pub agent: usize,
+    /// Показывать и те агенты, которых нет в системе.
+    pub show_all: bool,
     pub dir: TextField,
     pub name: TextField,
     pub worktree: bool,
@@ -95,6 +99,8 @@ pub struct App {
     pub dirty: bool,
     pub started: Instant,
     pub start_dir: PathBuf,
+    /// Какие агенты установлены (None — ещё проверяется). Заполняется фоновыми потоками.
+    available: Arc<Mutex<Vec<Option<bool>>>>,
     sidebar_first: usize,
     term_focused: bool,
     focus_supported: bool,
@@ -189,6 +195,7 @@ impl App {
             dirty: true,
             started: Instant::now(),
             start_dir,
+            available: Arc::new(Mutex::new(vec![])),
             sidebar_first: 0,
             term_focused: true,
             focus_supported: false,
@@ -197,10 +204,46 @@ impl App {
             tx,
             ctx,
         };
+        app.detect_agents();
         if let Some(w) = app.cfg.warnings.first().cloned() {
             app.toast(w);
         }
         app
+    }
+
+    /// Проверяет в фоне, какие агенты установлены (параллельно, чтобы не тормозить запуск).
+    fn detect_agents(&mut self) {
+        let n = self.cfg.agents.len();
+        *self.available.lock().unwrap() = vec![None; n];
+        for (i, def) in self.cfg.agents.iter().enumerate() {
+            let bin = def.command.split_whitespace().next().unwrap_or("").to_string();
+            let shared = self.available.clone();
+            std::thread::spawn(move || {
+                let ok = crate::session::find_binary(&bin).is_some();
+                if let Some(slot) = shared.lock().unwrap().get_mut(i) {
+                    *slot = Some(ok);
+                }
+            });
+        }
+    }
+
+    /// Установлен ли агент (пока проверка не закончилась — считаем, что да).
+    pub fn agent_available(&self, i: usize) -> bool {
+        self.available.lock().unwrap().get(i).copied().flatten().unwrap_or(true)
+    }
+
+    /// Агенты для выбора: только установленные, либо все.
+    pub fn visible_agents(&self, show_all: bool) -> Vec<usize> {
+        let all: Vec<usize> = (0..self.cfg.agents.len()).collect();
+        if show_all {
+            return all;
+        }
+        let ok: Vec<usize> = all.iter().copied().filter(|&i| self.agent_available(i)).collect();
+        if ok.is_empty() {
+            all
+        } else {
+            ok
+        }
     }
 
     pub fn anim_ms(&self) -> u128 {
@@ -570,8 +613,14 @@ impl App {
             .get(self.selected)
             .map(|s| s.cwd.clone())
             .unwrap_or_else(|| self.start_dir.clone());
+        let last = self.cfg.agents.len().saturating_sub(1);
+        let first_visible = self.visible_agents(false).first().copied().unwrap_or(0);
+        let chosen = agent.map(|i| i.min(last)).unwrap_or(first_visible);
+        // если выбранного агента нет в системе, показываем всех, чтобы выбор был виден
+        let show_all = !self.visible_agents(false).contains(&chosen);
         self.mode = Mode::New(NewForm {
-            agent: agent.unwrap_or(0).min(self.cfg.agents.len().saturating_sub(1)),
+            agent: chosen,
+            show_all,
             dir: TextField::new(&short_path(&dir)),
             name: TextField::default(),
             worktree: false,
@@ -680,7 +729,8 @@ impl App {
         let k = &self.cfg.keys;
         let hint = |a: Action, nav: &str| k.direct_label(a).unwrap_or_else(|| nav.to_string());
         let mut e = vec![PaletteEntry { title: "Новый агент".into(), hint: "n".into(), action: Action::NewAgent }];
-        for (i, d) in self.cfg.agents.iter().enumerate() {
+        for i in self.visible_agents(false) {
+            let d = &self.cfg.agents[i];
             e.push(PaletteEntry { title: format!("Новый: {}", d.name), hint: String::new(), action: Action::NewAgentOf(i) });
         }
         if !self.sessions.is_empty() {
@@ -759,7 +809,11 @@ impl App {
     }
 
     fn general_menu(&self, x: u16, y: u16) -> Menu {
-        let items = vec![
+        let mut items = vec![];
+        for i in self.visible_agents(false) {
+            items.push(MenuItem::new(&format!("Новый: {}", self.cfg.agents[i].name), Action::NewAgentOf(i), ""));
+        }
+        items.extend([
             MenuItem::new("Новый агент…", Action::NewAgent, "n"),
             MenuItem::new("Палитра команд", Action::Palette, "p"),
             MenuItem::sep(),
@@ -779,7 +833,7 @@ impl App {
             MenuItem::sep(),
             MenuItem::new("Помощь", Action::Help, "?"),
             MenuItem::new("Выйти", Action::Quit, "q"),
-        ];
+        ]);
         Menu::new(x, y, items, Rect::new(0, 0, self.term_size().0, self.term_size().1))
     }
 
@@ -982,7 +1036,6 @@ impl App {
     }
 
     fn key_new(&mut self, mut f: NewForm, k: KeyEvent) {
-        let n_agents = self.cfg.agents.len().max(1);
         match k.code {
             KeyCode::Esc => return,
             KeyCode::Enter => {
@@ -999,18 +1052,29 @@ impl App {
             _ => {
                 f.error = None;
                 match f.field {
-                    0 => match k.code {
-                        KeyCode::Left => f.agent = (f.agent + n_agents - 1) % n_agents,
-                        KeyCode::Right => f.agent = (f.agent + 1) % n_agents,
-                        KeyCode::Char(c) => {
-                            if let Some(d) = c.to_digit(10).map(|d| d as usize) {
-                                if (1..=n_agents).contains(&d) {
-                                    f.agent = d - 1;
+                    0 => {
+                        let vis = self.visible_agents(f.show_all);
+                        let pos = vis.iter().position(|&i| i == f.agent).unwrap_or(0);
+                        match k.code {
+                            KeyCode::Left if !vis.is_empty() => f.agent = vis[(pos + vis.len() - 1) % vis.len()],
+                            KeyCode::Right if !vis.is_empty() => f.agent = vis[(pos + 1) % vis.len()],
+                            KeyCode::Char('a' | 'ф') => {
+                                f.show_all = !f.show_all;
+                                let vis = self.visible_agents(f.show_all);
+                                if !vis.contains(&f.agent) {
+                                    f.agent = vis.first().copied().unwrap_or(0);
                                 }
                             }
+                            KeyCode::Char(c) => {
+                                if let Some(d) = c.to_digit(10).map(|d| d as usize) {
+                                    if (1..=vis.len()).contains(&d) {
+                                        f.agent = vis[d - 1];
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
                     1 => {
                         f.dir.handle_key(&k);
                     }
@@ -1084,6 +1148,12 @@ impl App {
                 }
                 MouseEventKind::Down(_) => {}
                 _ => self.mode = Mode::Menu(menu),
+            }
+            return;
+        }
+        if matches!(self.mode, Mode::New(_)) {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.mouse_new_form(x, y);
             }
             return;
         }
@@ -1171,6 +1241,38 @@ impl App {
         } else {
             s.scroll_by(up, 3);
         }
+    }
+
+    /// Клик в форме нового агента: выбор агента, переход между полями, галочка worktree.
+    fn mouse_new_form(&mut self, x: u16, y: u16) {
+        let Mode::New(mut f) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            return;
+        };
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        let lay = ui::form_layout(area, self, &f);
+        if !in_rect(&lay.popup, x, y) {
+            return; // клик мимо окна — отмена
+        }
+        if let Some(&(i, _)) = lay.chips.iter().find(|(_, r)| in_rect(r, x, y)) {
+            f.field = 0;
+            if i == usize::MAX {
+                f.show_all = !f.show_all;
+                let vis = self.visible_agents(f.show_all);
+                if !vis.contains(&f.agent) {
+                    f.agent = vis.first().copied().unwrap_or(0);
+                }
+            } else {
+                f.agent = i;
+            }
+        } else if in_rect(&lay.dir, x, y) {
+            f.field = 1;
+        } else if in_rect(&lay.name, x, y) {
+            f.field = 2;
+        } else if in_rect(&lay.worktree, x, y) {
+            f.field = 3;
+            f.worktree = !f.worktree;
+        }
+        self.mode = Mode::New(f);
     }
 
     fn context_menu(&mut self, x: u16, y: u16) {

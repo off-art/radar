@@ -35,32 +35,12 @@ n — новый, x — закрыть, p — палитра команд, ? —
 
 fn doctor() -> Result<()> {
     let cfg = config::Config::load();
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     println!("Radar {}", env!("CARGO_PKG_VERSION"));
     println!("Конфиг: {}", config::config_path().display());
     println!();
     for a in &cfg.agents {
         let bin = a.command.split_whitespace().next().unwrap_or("");
-        let found = if bin == "$SHELL" {
-            Some(shell.clone())
-        } else {
-            std::process::Command::new(&shell)
-                .args(["-l", "-i", "-c", &format!("command -v {}", session::shq(bin))])
-                .env("SHELL_SESSIONS_DISABLE", "1")
-                .env_remove("TERM_SESSION_ID")
-                .stderr(std::process::Stdio::null())
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                // шелл может напечатать приветствие — путь всегда в последней строке
-                .and_then(|o| {
-                    String::from_utf8_lossy(&o.stdout)
-                        .lines()
-                        .map(str::trim)
-                        .rfind(|l| l.starts_with('/'))
-                        .map(str::to_string)
-                })
-        };
+        let found = session::find_binary(bin);
         match found {
             Some(p) => println!("  ✓ {:<14} {}", a.name, p),
             None => println!("  ✗ {:<14} не найден ({})", a.name, bin),

@@ -9,7 +9,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -520,12 +520,74 @@ fn field_spans(t: &TextField, active: bool) -> Vec<Span<'static>> {
     ]
 }
 
+/// Расположение элементов формы «Новый агент» — общее для отрисовки и обработки кликов мыши.
+pub struct FormLayout {
+    pub popup: Rect,
+    /// (индекс агента или usize::MAX для кнопки «все/скрыть», область)
+    pub chips: Vec<(usize, Rect)>,
+    pub dir: Rect,
+    pub name: Rect,
+    pub worktree: Rect,
+    /// Строки с чипами: для каждой — индексы в `chips`.
+    rows: Vec<Vec<usize>>,
+    inner: Rect,
+}
+
+const FORM_LABEL: u16 = 8;
+
+pub fn form_layout(area: Rect, app: &App, form: &NewForm) -> FormLayout {
+    let w = 78u16.min(area.width);
+    // сначала раскладываем чипы по строкам, чтобы знать высоту окна
+    let avail = w.saturating_sub(2 + FORM_LABEL) as usize;
+    let mut items: Vec<(usize, String)> = app
+        .visible_agents(form.show_all)
+        .into_iter()
+        .map(|i| (i, format!(" {} ", app.cfg.agents[i].name)))
+        .collect();
+    let hidden = app.cfg.agents.len() - app.visible_agents(false).len();
+    if form.show_all {
+        if hidden > 0 {
+            items.push((usize::MAX, " − скрыть недоступных ".to_string()));
+        }
+    } else if hidden > 0 {
+        items.push((usize::MAX, format!(" + ещё {hidden} (не установлены) ")));
+    }
+    let mut rows: Vec<Vec<usize>> = vec![vec![]];
+    let mut used = 0;
+    for (k, (_, t)) in items.iter().enumerate() {
+        let tw = t.width() + 1;
+        if used + tw > avail && !rows.last().unwrap().is_empty() {
+            rows.push(vec![]);
+            used = 0;
+        }
+        rows.last_mut().unwrap().push(k);
+        used += tw;
+    }
+    let extra = rows.len() as u16 - 1;
+    let popup = centered(area, w, 16 + extra);
+    let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let mut chips = vec![];
+    for (r, row) in rows.iter().enumerate() {
+        let mut x = inner.x + FORM_LABEL;
+        for &k in row {
+            let (i, t) = &items[k];
+            let tw = t.width() as u16;
+            chips.push((*i, Rect::new(x, inner.y + r as u16, tw, 1)));
+            x += tw + 1;
+        }
+    }
+    let base = inner.y + extra;
+    let field = |dy: u16| Rect::new(inner.x, base + dy, inner.width, 1);
+    FormLayout { popup, chips, dir: field(2), name: field(4), worktree: field(6), rows, inner }
+}
+
 fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
-    let r = centered(f.area(), 78, 16);
+    let lay = form_layout(f.area(), app, form);
+    let r = lay.popup;
     f.render_widget(Clear, r);
     let block = popup_block("Новый агент");
-    let inner = block.inner(r);
     f.render_widget(block, r);
+    let inner = lay.inner;
 
     let label = |text: &str, active: bool| {
         Span::styled(
@@ -538,17 +600,38 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
         )
     };
 
-    // выбор агента
-    let mut agent_spans = vec![label("Агент", form.field == 0)];
-    for (i, a) in app.cfg.agents.iter().enumerate() {
-        let sel = i == form.agent;
-        let st = if sel {
-            Style::default().fg(Color::Black).bg(a.color).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(a.color)
-        };
-        agent_spans.push(Span::styled(format!(" {} ", a.name), st));
-        agent_spans.push(Span::raw(" "));
+    // выбор агента (строки чипов)
+    let mut lines: Vec<Line> = vec![];
+    for (ri, row) in lay.rows.iter().enumerate() {
+        let mut spans = vec![if ri == 0 { label("Агент", form.field == 0) } else { Span::raw(" ".repeat(FORM_LABEL as usize)) }];
+        for &k in row {
+            let (i, rect) = lay.chips[k];
+            let text = if i == usize::MAX {
+                if form.show_all { " − скрыть недоступных ".to_string() } else {
+                    let hidden = app.cfg.agents.len() - app.visible_agents(false).len();
+                    format!(" + ещё {hidden} (не установлены) ")
+                }
+            } else {
+                format!(" {} ", app.cfg.agents[i].name)
+            };
+            let _ = rect;
+            let st = if i == usize::MAX {
+                Style::default().fg(DIM)
+            } else {
+                let a = &app.cfg.agents[i];
+                let missing = !app.agent_available(i);
+                if i == form.agent {
+                    Style::default().fg(Color::Black).bg(a.color).add_modifier(Modifier::BOLD)
+                } else if missing {
+                    Style::default().fg(DIM).add_modifier(Modifier::CROSSED_OUT)
+                } else {
+                    Style::default().fg(a.color)
+                }
+            };
+            spans.push(Span::styled(text, st));
+            spans.push(Span::raw(" "));
+        }
+        lines.push(Line::from(spans));
     }
 
     let dir_text = form.dir.text();
@@ -565,8 +648,7 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
     let mut dir_line = vec![label("Папка", form.field == 1)];
     dir_line.extend(field_spans(&form.dir, form.field == 1));
 
-    let mut lines = vec![
-        Line::from(agent_spans),
+    lines.extend([
         Line::from(""),
         Line::from(dir_line),
         Line::from(""),
@@ -585,17 +667,17 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Enter — запустить · Tab/↑↓ — поле · ←/→ — агент · Ctrl+u/w/a/e — правка · Esc — отмена",
+            "Enter — запустить · клик или Tab — поле · ←/→ — агент · Esc — отмена",
             Style::default().fg(DIM),
         )),
-    ];
+    ]);
     if let Some(e) = &form.error {
         lines.push(Line::from(Span::styled(
             fit(e, inner.width as usize),
             Style::default().fg(Color::Rgb(248, 113, 113)),
         )));
     }
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_input_popup(f: &mut Frame, title: &str, value: &TextField) {
