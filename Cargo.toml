@@ -1,0 +1,26 @@
+[package]
+name = "radar"
+version = "0.1.0"
+edition = "2021"
+description = "Терминальный мультиплексор для AI-агентов: список агентов, статусы, уведомления"
+license = "MIT"
+readme = "README.md"
+keywords = ["tui", "ai", "agents", "terminal", "claude"]
+
+[dependencies]
+anyhow = "1.0.104"
+crossterm = "0.29.0"
+dirs = "7.0.0"
+portable-pty = "0.9.0"
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "1.1.6"
+unicode-width = "0.2"
+vt100 = "0.16.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3

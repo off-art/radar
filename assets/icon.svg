@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2b3b"/>
+      <stop offset="1" stop-color="#09111a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+    <!-- хвост луча: ярче у «передней» кромки -->
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="767" y1="306" x2="457" y2="196">
+      <stop offset="0" stop-color="#34d399" stop-opacity="0.62"/>
+      <stop offset="1" stop-color="#34d399" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="blur" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+    <clipPath id="body"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+  </defs>
+
+  <g filter="url(#shadow)"><rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/></g>
+
+  <g clip-path="url(#body)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg)"/>
+    <circle cx="512" cy="512" r="360" fill="url(#glow)"/>
+
+    <!-- кольца и перекрестие -->
+    <g fill="none" stroke="#34d399" stroke-linecap="round">
+      <circle cx="512" cy="512" r="110" stroke-opacity="0.34" stroke-width="7"/>
+      <circle cx="512" cy="512" r="210" stroke-opacity="0.30" stroke-width="7"/>
+      <circle cx="512" cy="512" r="310" stroke-opacity="0.28" stroke-width="9"/>
+      <line x1="512" y1="170" x2="512" y2="854" stroke-opacity="0.16" stroke-width="6"/>
+      <line x1="170" y1="512" x2="854" y2="512" stroke-opacity="0.16" stroke-width="6"/>
+    </g>
+
+    <!-- луч: клин от -100° до -40° (по часовой стрелке) -->
+    <path d="M512 512 L457.4 205.4 A310 310 0 0 1 749.5 312.7 Z" fill="url(#sweep)"/>
+    <line x1="512" y1="512" x2="749.5" y2="312.7" stroke="#6ee7b7" stroke-width="10" stroke-linecap="round" stroke-opacity="0.95"/>
+
+    <!-- цели: цвета статусов интерфейса (готов / ждёт / работает) -->
+    <g filter="url(#blur)" opacity="0.9">
+      <circle cx="697" cy="357" r="34" fill="#4ade80"/>
+      <circle cx="662" cy="592" r="30" fill="#fbbf24"/>
+      <circle cx="288" cy="632" r="30" fill="#38bdf8"/>
+    </g>
+    <circle cx="697" cy="357" r="26" fill="#4ade80"/>
+    <circle cx="662" cy="592" r="23" fill="#fbbf24"/>
+    <circle cx="288" cy="632" r="23" fill="#38bdf8"/>
+
+    <circle cx="512" cy="512" r="20" fill="#6ee7b7"/>
+  </g>
+
+  <!-- лёгкий блик по верхней кромке -->
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="3"/>
+</svg>
