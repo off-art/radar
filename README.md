@@ -15,26 +15,73 @@
 
 ## Установка (macOS)
 
-**Вариант 1 — готовый бинарник** (без brew, без Rust и без прав администратора; нужен только `curl`, который есть в macOS):
+Не нужны ни brew, ни Rust, ни права администратора — только то, что есть в macOS. Выберите способ.
+
+### Способ 1 — одной командой (рекомендуется)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash
 ```
 
-Скрипт кладёт `radar` в `~/.local/bin`. Если этой папки нет в `PATH`, он подскажет, что добавить в `~/.zshrc`.
+Скрипт скачивает готовый бинарник под ваш процессор (Apple Silicon / Intel) в `~/.local/bin` и подсказывает,
+что добавить в `PATH`. Файл, скачанный через `curl`, карантином macOS не помечается.
 
-**Вариант 2 — из исходников** (нужен [Rust](https://rustup.rs)):
+### Способ 2 — скачать архив вручную (без `curl`-скрипта)
+
+1. Откройте [Releases](https://github.com/off-art/radar/releases/latest) и скачайте архив под свой Mac:
+   `radar-aarch64-apple-darwin.tar.gz` (Apple Silicon: M1/M2/M3…) или `radar-x86_64-apple-darwin.tar.gz` (Intel).
+   Какой у вас процессор: меню Apple → «Об этом Mac» (или `uname -m`: `arm64` — Apple Silicon, `x86_64` — Intel).
+2. Распакуйте и положите в `~/.local/bin`:
+   ```sh
+   cd ~/Downloads
+   tar xzf radar-aarch64-apple-darwin.tar.gz        # имя файла — как у скачанного
+   mkdir -p ~/.local/bin && mv radar ~/.local/bin/
+   xattr -d com.apple.quarantine ~/.local/bin/radar # снимает карантин браузера
+   ```
+3. Если `~/.local/bin` нет в `PATH`:
+   ```sh
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+   ```
+
+Такой же архив можно просто переслать коллеге в мессенджере — шаги 2–3 те же.
+Без `xattr` macOS пишет, что не может проверить разработчика: тогда *Системные настройки → Конфиденциальность и
+безопасность → «Всё равно открыть»*.
+
+### Способ 3 — из исходников
+
+Нужен Rust. Без brew он ставится так:
 
 ```sh
-git clone https://github.com/off-art/radar.git
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh     # затем перезапустите терминал
+git clone https://github.com/off-art/radar.git                      # или «Code → Download ZIP» и распаковать
 cd radar
-cargo install --path .        # ставит в ~/.cargo/bin
+./install.sh                                                        # соберёт и положит в ~/.local/bin
 ```
 
-Проверка: `radar doctor` — покажет, какие агенты найдены в вашей системе.
+Первая сборка — около двух минут. Альтернатива: `cargo install --path .` (ставит в `~/.cargo/bin`).
 
-> Если скачали бинарник через браузер, macOS может его заблокировать:
-> `xattr -d com.apple.quarantine ~/Downloads/radar`
+### После установки
+
+```sh
+radar doctor        # какие агенты найдены (Claude Code, Codex, OpenCode, Qwen Code, GigaCode, Gemini CLI)
+radar notify-test   # проверка уведомлений: создаст иконку, проиграет звуки, покажет тестовое уведомление
+radar               # запуск
+```
+
+При первом уведомлении macOS спросит разрешение для «Radar» — нажмите «Разрешить» (или включите в
+*Системные настройки → Уведомления → Radar*).
+
+### Обновление
+
+Повторите ту же команду установки (способ 1) или замените бинарник из нового релиза (способ 2). Настройки
+(`~/.config/radar/`) сохраняются.
+
+### Удаление
+
+```sh
+rm ~/.local/bin/radar
+rm -rf ~/.config/radar ~/.radar     # настройки, помощник уведомлений, git-worktree агентов (необязательно)
+```
 
 ## Использование
 
@@ -42,6 +89,7 @@ cargo install --path .        # ставит в ~/.cargo/bin
 radar                        # открыть интерфейс, агентов добавлять клавишей n
 radar ~/work/api claude      # открыть и сразу запустить Claude Code в папке
 radar claude claude codex    # три агента в текущей папке
+radar ~/work/api gigacode    # GigaCode CLI в папке проекта
 ```
 
 Управление — **мышью** и **клавишами** (по модели Herdr).
@@ -159,14 +207,22 @@ cargo build --release     # релизная сборка → target/release/rad
 `src/keys.rs` — действия и сочетания, `src/menu.rs` — меню и палитра, `src/notify.rs` — уведомления и звук,
 `assets/` — иконка и звуки (`python3 assets/gen_sounds.py` пересоздаёт звуки).
 
-## Публикация релиза
+## Публикация релиза (для автора)
 
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
+1. Создайте на GitHub **публичный** репозиторий `radar` (публичный — чтобы `curl` у коллег работал без токена).
+2. Отправьте код и тег:
+   ```sh
+   git init -b main && git add -A && git commit -m "Radar 0.1.0"
+   git remote add origin git@github.com:off-art/radar.git     # или https://github.com/off-art/radar.git
+   git push -u origin main
+   git tag v0.1.0 && git push origin v0.1.0
+   ```
+3. Workflow `.github/workflows/release.yml` соберёт бинарники для Apple Silicon и Intel и приложит их к релизу
+   (вкладка *Actions*, 3–5 минут). После этого работают `install.sh` и ручная загрузка из Releases.
+4. Новая версия: поднимите `version` в `Cargo.toml`, закоммитьте, `git tag v0.1.1 && git push origin v0.1.1`.
 
-Workflow `.github/workflows/release.yml` соберёт бинарники для Apple Silicon и Intel и приложит их к релизу —
-после этого работает `install.sh`.
+Если GitHub на работе недоступен, архивы из `target/<target>/release` можно раздавать как обычные файлы
+(способ 2) или положить во внутреннее хранилище и задать его в `RADAR_REPO` / `install.sh`.
 
 ## Лицензия
 
