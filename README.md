@@ -297,23 +297,6 @@ cargo build --release     # релизная сборка → target/release/rad
 `src/keys.rs` — действия и сочетания, `src/menu.rs` — меню и палитра, `src/notify.rs` — уведомления и звук,
 `assets/` — иконка и звуки (`python3 assets/gen_sounds.py` пересоздаёт звуки).
 
-## Публикация релиза (для автора)
-
-1. Создайте на GitHub **публичный** репозиторий `radar` (публичный — чтобы `curl` у коллег работал без токена).
-2. Отправьте код и тег:
-   ```sh
-   git init -b main && git add -A && git commit -m "Radar 0.2.0"
-   git remote add origin git@github.com:off-art/radar.git     # или https://github.com/off-art/radar.git
-   git push -u origin main
-   git tag v0.2.0 && git push origin v0.2.0
-   ```
-3. Workflow `.github/workflows/release.yml` соберёт бинарники для Apple Silicon и Intel и приложит их к релизу
-   (вкладка *Actions*, 3–5 минут). После этого работают `install.sh` и ручная загрузка из Releases.
-4. Новая версия: поднимите `version` в `Cargo.toml`, закоммитьте, `git tag v0.2.1 && git push origin v0.2.1`.
-
-Если GitHub на работе недоступен, архивы из `target/<target>/release` можно раздавать как обычные файлы
-(способ 2) или положить во внутреннее хранилище и задать его в `RADAR_REPO` / `install.sh`.
-
 ## Лицензия
 
 MIT
