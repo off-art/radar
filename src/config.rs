@@ -37,6 +37,12 @@ struct RawAgent {
 }
 
 #[derive(Deserialize, Default)]
+struct RawTheme {
+    name: Option<String>,
+    custom: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Deserialize, Default)]
 struct RawKeys {
     prefix: Option<String>,
     nav_timeout: Option<u64>,
@@ -48,11 +54,14 @@ struct RawConfig {
     notifications: Option<bool>,
     sound: Option<bool>,
     popups: Option<bool>,
+    restore: Option<bool>,
     sound_theme: Option<String>,
     volume: Option<f32>,
     sound_done: Option<String>,
     sound_waiting: Option<String>,
     mouse: Option<bool>,
+    sidebar_width: Option<u16>,
+    theme: Option<RawTheme>,
     keys: Option<RawKeys>,
     #[serde(default)]
     agent: Vec<RawAgent>,
@@ -64,6 +73,8 @@ pub struct Config {
     pub sound: bool,
     /// Всплывающие уведомления macOS (звук включается отдельно).
     pub popups: bool,
+    /// Восстанавливать список агентов при запуске.
+    pub restore: bool,
     /// Звуковая тема: bell, sonar, retro, harp, knock, thump, drop.
     pub sound_theme: String,
     /// Громкость уведомлений, 0.0–1.0.
@@ -71,6 +82,10 @@ pub struct Config {
     pub sound_done: Option<PathBuf>,
     pub sound_waiting: Option<PathBuf>,
     pub mouse: bool,
+    /// Ширина списка агентов; 0 — автоматически.
+    pub sidebar_width: u16,
+    pub theme_name: String,
+    pub theme_custom: BTreeMap<String, String>,
     pub keys: Keys,
     pub agents: Vec<AgentDef>,
     /// Замечания к конфигу (неизвестные сочетания и т. п.) — показываются при запуске.
@@ -99,7 +114,11 @@ struct RawState {
     notifications: Option<bool>,
     sound: Option<bool>,
     popups: Option<bool>,
+    restore: Option<bool>,
     sound_theme: Option<String>,
+    theme: Option<String>,
+    volume: Option<f32>,
+    sidebar_width: Option<u16>,
 }
 
 fn parse_color(s: &str) -> Option<Color> {
@@ -146,11 +165,15 @@ impl Config {
             notifications: true,
             sound: true,
             popups: true,
+            restore: true,
             sound_theme: crate::notify::DEFAULT_THEME.to_string(),
             volume: 0.6,
             sound_done: None,
             sound_waiting: None,
             mouse: true,
+            sidebar_width: 0,
+            theme_name: crate::theme::DEFAULT.to_string(),
+            theme_custom: BTreeMap::new(),
             keys: Keys::default(),
             agents: builtin(),
             warnings: vec![],
@@ -170,6 +193,7 @@ impl Config {
         cfg.notifications = raw.notifications.unwrap_or(true);
         cfg.sound = raw.sound.unwrap_or(true);
         cfg.popups = raw.popups.unwrap_or(true);
+        cfg.restore = raw.restore.unwrap_or(true);
         if let Some(t) = raw.sound_theme {
             cfg.sound_theme = t;
         }
@@ -177,6 +201,15 @@ impl Config {
         cfg.volume = raw.volume.unwrap_or(0.6).clamp(0.0, 1.0);
         cfg.sound_done = raw.sound_done.map(|p| crate::app::expand_tilde(&p));
         cfg.sound_waiting = raw.sound_waiting.map(|p| crate::app::expand_tilde(&p));
+        cfg.sidebar_width = raw.sidebar_width.unwrap_or(0);
+        if let Some(t) = raw.theme {
+            if let Some(n) = t.name {
+                cfg.theme_name = n;
+            }
+            cfg.theme_custom = t.custom.unwrap_or_default();
+            let mut probe = crate::theme::find(&cfg.theme_name);
+            cfg.warnings.extend(probe.apply_custom(&cfg.theme_custom));
+        }
         if let Some(k) = raw.keys {
             if let Some(p) = k.prefix {
                 match Chord::parse(&p) {
@@ -242,24 +275,47 @@ impl Config {
         if let Some(v) = st.popups {
             self.popups = v;
         }
+        if let Some(v) = st.restore {
+            self.restore = v;
+        }
         if let Some(v) = st.sound_theme {
             self.sound_theme = v;
+        }
+        if let Some(v) = st.theme {
+            self.theme_name = v;
+        }
+        if let Some(v) = st.volume {
+            self.volume = v.clamp(0.0, 1.0);
+        }
+        if let Some(v) = st.sidebar_width {
+            self.sidebar_width = v;
         }
     }
 
     pub fn save_state(&self) {
         let text = format!(
-            "# Настройки, изменённые из интерфейса Radar (важнее config.toml)\nnotifications = {}\nsound = {}\npopups = {}\nsound_theme = \"{}\"\n",
+            "# Настройки, изменённые из интерфейса Radar (важнее config.toml)\nnotifications = {}\nsound = {}\npopups = {}\nrestore = {}\nsound_theme = \"{}\"\ntheme = \"{}\"\nvolume = {:.2}\nsidebar_width = {}\n",
             self.notifications,
             self.sound,
             self.popups,
-            self.sound_theme.replace(['"', '\\'], "")
+            self.restore,
+            self.sound_theme.replace(['"', '\\'], ""),
+            self.theme_name.replace(['"', '\\'], ""),
+            self.volume,
+            self.sidebar_width
         );
         let p = state_path();
         if let Some(d) = p.parent() {
             let _ = std::fs::create_dir_all(d);
         }
         let _ = std::fs::write(p, text);
+    }
+
+    /// Активная цветовая схема (с учётом `[theme.custom]`).
+    pub fn theme(&self) -> crate::theme::Theme {
+        let mut t = crate::theme::find(&self.theme_name);
+        t.apply_custom(&self.theme_custom);
+        t
     }
 
     pub fn find(&self, id: &str) -> Option<&AgentDef> {
@@ -278,6 +334,8 @@ notifications = true
 sound = true
 # Всплывающие уведомления macOS. Можно выключить, оставив только звук: popups = false
 popups = true
+# Восстанавливать список агентов при следующем запуске Radar
+restore = true
 # Звуковая тема: bell, sonar, retro, harp, knock, thump, drop (выбор также в палитре: Ctrl+b, p, «Звук»)
 sound_theme = "bell"
 # Громкость уведомлений (0.0–1.0). Свои звуки: sound_done / sound_waiting = "~/sounds/x.wav"
@@ -285,10 +343,26 @@ volume = 0.6
 # Управление мышью (клик по списку, прокрутка). Выделение текста — с зажатым Option/Shift.
 mouse = true
 
+# Ширина списка агентов в колонках (0 — автоматически)
+sidebar_width = 0
+
+# Цветовая схема (меняется и в интерфейсе: Ctrl+b, затем «,» — Настройки).
+# radar, terminal (палитра вашего терминала), catppuccin, catppuccin-latte, tokyo-night, tokyo-night-day,
+# gruvbox, dracula, nord, one-dark, solarized-dark, solarized-light
+[theme]
+name = "radar"
+
+# Переопределение отдельных цветов поверх выбранной схемы (hex, rgb(r,g,b) или имя):
+# accent, panel_bg, sidebar_bg, active_row_bg, header_bg, text, subtext0, overlay0, overlay1,
+# green, yellow, red, blue, teal, peach, mauve
+# [theme.custom]
+# accent = "#a6e3a1"
+
 # Клавиши. Префикс включает режим навигации (j/k — выбор, n — новый, x — закрыть, ? — помощь),
 # выход из него — Esc или Enter. Сочетания без префикса (direct) — только те, что не нужны агентам.
-# Действия: new, new_here, close, rename, restart, mute, grid, notifications, next, prev,
-#           waiting, scroll_up, scroll_down, palette, help, quit, select_1 … select_9
+# Действия: new, new_here, close, rename, restart, mute, grid, notifications, sound, popups, pick_sound,
+#           settings, integrations, next, prev, waiting, scroll_up, scroll_down, palette, help, quit,
+#           select_1 … select_9
 [keys]
 prefix = "ctrl+b"          # например "ctrl+space" или "ctrl+a"
 nav_timeout = 0            # секунд до автовыхода из режима навигации (0 — без таймера)

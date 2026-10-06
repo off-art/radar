@@ -17,6 +17,16 @@ die() { printf '\033[31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 mkdir -p "$BIN_DIR"
 
+# Ставим бинарник НОВЫМ файлом: если перезаписать работающий radar поверх (cp), macOS на Apple Silicon
+# держит в кэше подпись старого файла и убивает новый процесс («killed»). Поэтому: удалить → положить → подписать.
+put_binary() {
+  rm -f "$BIN_DIR/radar"
+  install -m 755 "$1" "$BIN_DIR/radar"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    codesign --force --sign - "$BIN_DIR/radar" >/dev/null 2>&1 || true
+  fi
+}
+
 SRC="${BASH_SOURCE[0]:-}"
 HERE=""
 [ -n "$SRC" ] && [ -f "$SRC" ] && HERE="$(cd "$(dirname "$SRC")" && pwd)"
@@ -31,7 +41,7 @@ if [ -n "$HERE" ] && [ -f "$HERE/Cargo.toml" ]; then
   fi
   say "Собираю из исходников (cargo build --release), первый раз ~1-2 минуты…"
   (cd "$HERE" && cargo build --release)
-  install -m 755 "$HERE/target/release/radar" "$BIN_DIR/radar"
+  put_binary "$HERE/target/release/radar"
 else
   # 2) Готовый бинарник из релиза (curl | bash)
   case "$(uname -m)" in
@@ -45,7 +55,7 @@ else
   trap 'rm -rf "$TMP"' EXIT
   curl -fsSL "$URL" -o "$TMP/radar.tar.gz" || die "не удалось скачать релиз. Проверьте, что в $REPO есть опубликованный релиз."
   tar -xzf "$TMP/radar.tar.gz" -C "$TMP"
-  install -m 755 "$TMP/radar" "$BIN_DIR/radar"
+  put_binary "$TMP/radar"
 fi
 
 # Файл, скачанный браузером, помечается карантином macOS; через curl — нет, но на всякий случай.

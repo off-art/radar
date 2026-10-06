@@ -1,6 +1,6 @@
 //! Состояние приложения, обработка событий и главный цикл.
 
-use crate::config::{AgentDef, Config};
+use crate::config::{AgentDef, Config, Kind};
 use crate::input::{key_to_bytes, mouse_to_bytes, MouseEv};
 use crate::keys::{nav_action, Action};
 use crate::menu::{filter_palette, Menu, MenuItem, PaletteEntry};
@@ -63,6 +63,19 @@ pub enum Mode {
     Help,
     Menu(Menu),
     Palette(Palette),
+    /// Настройки; число — выбранная строка.
+    Settings(usize),
+    /// Интеграции с агентами; число — выбранная строка.
+    Integrations(usize),
+}
+
+pub struct IntegrationRow {
+    pub name: String,
+    pub id: String,
+    /// None — для агента интеграции нет.
+    pub state: Option<crate::integrations::State>,
+    pub found: bool,
+    pub path: String,
 }
 
 pub struct PaneRect {
@@ -88,6 +101,7 @@ pub struct Geometry {
 
 pub struct App {
     pub cfg: Config,
+    pub theme: crate::theme::Theme,
     pub sessions: Vec<Session>,
     pub selected: usize,
     pub grid: bool,
@@ -96,6 +110,8 @@ pub struct App {
     pub toast: Option<(String, Instant)>,
     pub notifications: bool,
     pub quit: bool,
+    /// Последний записанный список агентов (чтобы не писать файл зря).
+    persisted: String,
     pub dirty: bool,
     pub started: Instant,
     pub start_dir: PathBuf,
@@ -182,7 +198,9 @@ fn make_worktree(dir: &Path, agent_id: &str) -> Result<PathBuf> {
 impl App {
     pub fn new(cfg: Config, start_dir: PathBuf, tx: Sender<Msg>, ctx: SpawnCtx) -> App {
         let notifications = cfg.notifications;
+        let theme = cfg.theme();
         let mut app = App {
+            theme,
             cfg,
             sessions: vec![],
             selected: 0,
@@ -192,6 +210,7 @@ impl App {
             toast: None,
             notifications,
             quit: false,
+            persisted: String::new(),
             dirty: true,
             started: Instant::now(),
             start_dir,
@@ -292,6 +311,17 @@ impl App {
         name: Option<String>,
         worktree: bool,
     ) -> Result<()> {
+        self.create_session_with(def, dir, name, worktree, None)
+    }
+
+    fn create_session_with(
+        &mut self,
+        def: AgentDef,
+        dir: PathBuf,
+        name: Option<String>,
+        worktree: bool,
+        resume: Option<&str>,
+    ) -> Result<()> {
         if !dir.is_dir() {
             return Err(anyhow!("папка не найдена: {}", dir.display()));
         }
@@ -324,11 +354,78 @@ impl App {
             self.pane_size(),
             self.tx.clone(),
             &self.ctx,
+            resume,
         )?;
         self.sessions.push(s);
         self.selected = self.sessions.len() - 1;
         self.dirty = true;
         Ok(())
+    }
+
+    /// Поднимает агентов, сохранённых при прошлом закрытии Radar.
+    pub fn restore_sessions(&mut self) {
+        if !self.cfg.restore {
+            return;
+        }
+        let saved = crate::persist::load();
+        let mut failed = 0;
+        for sv in &saved.sessions {
+            let Some(def) = self.cfg.agents.iter().find(|a| a.name == sv.agent).cloned() else {
+                failed += 1;
+                continue;
+            };
+            let dir = PathBuf::from(&sv.dir);
+            match self.create_session_with(def, dir, Some(sv.name.clone()), false, sv.resume.as_deref()) {
+                Ok(()) => {
+                    if let Some(s) = self.sessions.last_mut() {
+                        s.muted = sv.muted;
+                        s.worktree = sv.worktree.as_ref().map(PathBuf::from);
+                    }
+                }
+                Err(_) => failed += 1,
+            }
+        }
+        if !self.sessions.is_empty() {
+            self.selected = saved.selected.min(self.sessions.len() - 1);
+        }
+        if failed > 0 {
+            self.toast(format!("Не удалось восстановить агентов: {failed} (папка удалена или агент убран из конфига)"));
+        }
+        self.persisted = crate::persist::to_text(&self.snapshot());
+    }
+
+    fn snapshot(&self) -> crate::persist::File {
+        let mut sessions = vec![];
+        let mut selected = 0;
+        for (i, s) in self.sessions.iter().enumerate() {
+            if !s.is_running() {
+                continue; // агент завершился сам — не возвращаем
+            }
+            if i == self.selected {
+                selected = sessions.len();
+            }
+            sessions.push(crate::persist::Saved {
+                agent: s.agent.clone(),
+                dir: s.cwd.to_string_lossy().to_string(),
+                name: s.name.clone(),
+                worktree: s.worktree.as_ref().map(|p| p.to_string_lossy().to_string()),
+                muted: s.muted,
+                resume: s.resume_id.clone(),
+            });
+        }
+        crate::persist::File { selected, sessions }
+    }
+
+    /// Записывает список агентов, если он изменился (вызывается из главного цикла).
+    pub fn persist_sessions(&mut self) {
+        if !self.cfg.restore {
+            return;
+        }
+        let text = crate::persist::to_text(&self.snapshot());
+        if text != self.persisted {
+            crate::persist::save_text(&text);
+            self.persisted = text;
+        }
     }
 
     fn restart(&mut self, idx: usize) {
@@ -343,9 +440,10 @@ impl App {
             return;
         };
         let (cwd, name, wt, muted) = (old.cwd.clone(), old.name.clone(), old.worktree.clone(), old.muted);
+        let resume = old.resume_id.clone();
         let id = self.next_id;
         self.next_id += 1;
-        match Session::spawn(id, &def, name, cwd, wt, self.pane_size(), self.tx.clone(), &self.ctx) {
+        match Session::spawn(id, &def, name, cwd, wt, self.pane_size(), self.tx.clone(), &self.ctx, resume.as_deref()) {
             Ok(mut s) => {
                 s.muted = muted;
                 self.sessions[idx] = s;
@@ -427,7 +525,13 @@ impl App {
     pub fn compute_layout(&mut self, area: Rect) {
         let status = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1.min(area.height));
         let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
-        let sw = if area.width < 60 { 0 } else { (area.width / 4).clamp(26, 36) };
+        let sw = if area.width < 60 {
+            0
+        } else if self.cfg.sidebar_width > 0 {
+            self.cfg.sidebar_width.min(area.width / 2)
+        } else {
+            (area.width / 4).clamp(26, 36)
+        };
         let sidebar = Rect::new(body.x, body.y, sw, body.height);
         let main = Rect::new(body.x + sw, body.y, body.width - sw, body.height);
 
@@ -695,6 +799,8 @@ impl App {
                 }
             }
             Action::PickSound => self.open_sound_picker(),
+            Action::Settings => self.mode = Mode::Settings(0),
+            Action::Integrations => self.mode = Mode::Integrations(0),
             Action::Next => self.select_rel(1),
             Action::Prev => self.select_rel(-1),
             Action::Select(i) => self.select(i),
@@ -775,6 +881,8 @@ impl App {
                 action: Action::SetTheme(i),
             });
         }
+        e.push(PaletteEntry { title: "Настройки: тема оформления, звук, ширина списка".into(), hint: ",".into(), action: Action::Settings });
+        e.push(PaletteEntry { title: "Интеграции агентов: точные статусы через хуки".into(), hint: String::new(), action: Action::Integrations });
         e.push(PaletteEntry { title: "Помощь и горячие клавиши".into(), hint: "?".into(), action: Action::Help });
         e.push(PaletteEntry { title: "Выйти из Radar".into(), hint: "q".into(), action: Action::Quit });
         self.mode = Mode::Palette(Palette { input: TextField::default(), entries: e, sel: 0 });
@@ -831,6 +939,8 @@ impl App {
             ),
             MenuItem::new("Выбрать звук…", Action::PickSound, "S"),
             MenuItem::sep(),
+            MenuItem::new("Настройки…", Action::Settings, ","),
+            MenuItem::new("Интеграции агентов…", Action::Integrations, ""),
             MenuItem::new("Помощь", Action::Help, "?"),
             MenuItem::new("Выйти", Action::Quit, "q"),
         ]);
@@ -901,6 +1011,8 @@ impl App {
             Mode::Confirm(c) => self.key_confirm(c, k),
             Mode::Menu(m) => self.key_menu(m, k),
             Mode::Palette(p) => self.key_palette(p, k),
+            Mode::Settings(i) => self.key_settings(i, k),
+            Mode::Integrations(i) => self.key_integrations(i, k),
             Mode::Help => {}
         }
     }
@@ -980,6 +1092,176 @@ impl App {
                 }
             }
             _ => self.mode = Mode::Menu(m),
+        }
+    }
+
+    // ───────────── настройки ─────────────
+
+    /// Строки экрана настроек: (название, значение).
+    pub fn settings_rows(&self) -> Vec<(String, String)> {
+        let onoff = |b: bool| if b { "вкл" } else { "выкл" }.to_string();
+        vec![
+            ("Цветовая схема".into(), self.cfg.theme_name.clone()),
+            ("Уведомления".into(), onoff(self.notifications)),
+            ("Звук".into(), onoff(self.cfg.sound)),
+            ("Звуковая тема".into(), self.cfg.sound_theme.clone()),
+            ("Громкость".into(), format!("{}%", (self.cfg.volume * 100.0).round() as u32)),
+            ("Всплывающие окошки".into(), onoff(self.cfg.popups)),
+            (
+                "Ширина списка".into(),
+                if self.cfg.sidebar_width == 0 { "авто".into() } else { self.cfg.sidebar_width.to_string() },
+            ),
+            ("Восстанавливать агентов".into(), onoff(self.cfg.restore)),
+        ]
+    }
+
+    /// Меняет настройку: dir = +1 / -1 (для переключателей направление не важно).
+    fn settings_change(&mut self, row: usize, dir: i32) {
+        fn cycle<T: PartialEq + Clone>(list: &[T], cur: &T, dir: i32) -> T {
+            let n = list.len() as i32;
+            let i = list.iter().position(|x| x == cur).unwrap_or(0) as i32;
+            list[((i + dir).rem_euclid(n)) as usize].clone()
+        }
+        match row {
+            0 => {
+                let names: Vec<String> = crate::theme::names().iter().map(|s| s.to_string()).collect();
+                self.cfg.theme_name = cycle(&names, &self.cfg.theme_name, dir);
+                self.theme = self.cfg.theme();
+            }
+            1 => {
+                self.notifications = !self.notifications;
+                self.cfg.notifications = self.notifications;
+            }
+            2 => self.cfg.sound = !self.cfg.sound,
+            3 => {
+                let names: Vec<String> = notify::theme_names().iter().map(|s| s.to_string()).collect();
+                self.cfg.sound_theme = cycle(&names, &self.cfg.sound_theme, dir);
+                notify::preview(&self.notify_settings());
+            }
+            4 => {
+                self.cfg.volume = (self.cfg.volume + 0.1 * dir as f32).clamp(0.0, 1.0);
+                self.cfg.volume = (self.cfg.volume * 10.0).round() / 10.0;
+                notify::preview(&self.notify_settings());
+            }
+            5 => self.cfg.popups = !self.cfg.popups,
+            6 => {
+                self.cfg.sidebar_width = cycle(&[0u16, 26, 32, 40, 48], &self.cfg.sidebar_width, dir);
+            }
+            7 => self.cfg.restore = !self.cfg.restore,
+            _ => {}
+        }
+        self.cfg.save_state();
+        self.dirty = true;
+    }
+
+    fn key_settings(&mut self, mut sel: usize, k: KeyEvent) {
+        let n = self.settings_rows().len();
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') => return,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.mode = Mode::Integrations(0);
+                return;
+            }
+            KeyCode::Down | KeyCode::Char('j') => sel = (sel + 1) % n,
+            KeyCode::Up | KeyCode::Char('k') => sel = (sel + n - 1) % n,
+            KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter | KeyCode::Char(' ') => self.settings_change(sel, 1),
+            KeyCode::Left | KeyCode::Char('h') => self.settings_change(sel, -1),
+            _ => {}
+        }
+        self.mode = Mode::Settings(sel);
+    }
+
+    fn mouse_settings(&mut self, sel: usize, x: u16, y: u16) {
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        let (popup, rows) = ui::settings_layout(area, self.settings_rows().len());
+        self.mode = Mode::Settings(sel);
+        if !in_rect(&popup, x, y) {
+            self.mode = Mode::Normal;
+            return;
+        }
+        if in_rect(&ui::tab_rects(popup)[1], x, y) {
+            self.mode = Mode::Integrations(0);
+            return;
+        }
+        if let Some(i) = rows.iter().position(|r| in_rect(r, x, y)) {
+            // левая половина строки — назад, правая — вперёд
+            let mid = rows[i].x + rows[i].width / 2;
+            self.mode = Mode::Settings(i);
+            self.settings_change(i, if x < mid && !matches!(i, 1 | 2 | 5 | 7) { -1 } else { 1 });
+        }
+    }
+
+    /// Строки раздела «Интеграции»: все агенты, кроме обычного шелла.
+    pub fn integration_rows(&self) -> Vec<IntegrationRow> {
+        use crate::integrations as ig;
+        self.cfg
+            .agents
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.kind != Kind::Shell)
+            .map(|(i, a)| {
+                let id = ig::key(&a.command);
+                IntegrationRow {
+                name: a.name.clone(),
+                state: ig::supported(&id).then(|| ig::state(&id)),
+                found: self.agent_available(i),
+                path: if ig::supported(&id) {
+                    ig::describe(&id)
+                } else {
+                    "интеграции нет: статусы определяются по экрану".into()
+                },
+                id,
+            }
+            })
+            .collect()
+    }
+
+    fn integration_toggle(&mut self, row: usize) {
+        use crate::integrations as ig;
+        let rows = self.integration_rows();
+        let Some(r) = rows.get(row) else { return };
+        match r.state {
+            None => self.toast(format!("Для «{}» интеграции пока нет", r.name)),
+            Some(ig::State::Builtin) => self.toast(format!("{}: интеграция встроена и всегда включена", r.name)),
+            Some(ig::State::Installed) => match ig::uninstall(&r.id) {
+                Ok(()) => self.toast(format!("{}: интеграция выключена", r.name)),
+                Err(e) => self.toast(format!("Ошибка: {e}")),
+            },
+            Some(ig::State::NotInstalled) => match ig::install(&r.id) {
+                Ok(_) => self.toast(format!("{}: интеграция включена — перезапустите агента", r.name)),
+                Err(e) => self.toast(format!("Ошибка: {e}")),
+            },
+        }
+        self.dirty = true;
+    }
+
+    fn key_integrations(&mut self, mut sel: usize, k: KeyEvent) {
+        let n = self.integration_rows().len().max(1);
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') => return,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.mode = Mode::Settings(0);
+                return;
+            }
+            KeyCode::Down | KeyCode::Char('j') => sel = (sel + 1) % n,
+            KeyCode::Up | KeyCode::Char('k') => sel = (sel + n - 1) % n,
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Right | KeyCode::Left => self.integration_toggle(sel),
+            _ => {}
+        }
+        self.mode = Mode::Integrations(sel);
+    }
+
+    fn mouse_integrations(&mut self, sel: usize, x: u16, y: u16) {
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        let (popup, rects) = ui::integrations_layout(area, self.integration_rows().len());
+        self.mode = Mode::Integrations(sel);
+        if !in_rect(&popup, x, y) {
+            self.mode = Mode::Normal;
+        } else if in_rect(&ui::tab_rects(popup)[0], x, y) {
+            self.mode = Mode::Settings(0);
+        } else if let Some(i) = rects.iter().position(|r| in_rect(r, x, y)) {
+            self.mode = Mode::Integrations(i);
+            self.integration_toggle(i);
         }
     }
 
@@ -1148,6 +1430,18 @@ impl App {
                 }
                 MouseEventKind::Down(_) => {}
                 _ => self.mode = Mode::Menu(menu),
+            }
+            return;
+        }
+        if let Mode::Settings(sel) = self.mode {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.mouse_settings(sel, x, y);
+            }
+            return;
+        }
+        if let Mode::Integrations(sel) = self.mode {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.mouse_integrations(sel, x, y);
             }
             return;
         }
@@ -1330,6 +1624,7 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
             if app.quit {
                 break;
             }
+            app.persist_sessions();
             let since = last_draw.elapsed();
             let due = (app.dirty && since >= Duration::from_millis(16))
                 || (app.needs_animation() && since >= Duration::from_millis(100))

@@ -1,6 +1,6 @@
 [package]
 name = "radar"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Терминальный мультиплексор для AI-агентов: список агентов, статусы, уведомления"
 license = "MIT"
@@ -8,6 +8,7 @@ readme = "README.md"
 keywords = ["tui", "ai", "agents", "terminal", "claude"]
 
 [dependencies]
+libc = "0.2"
 anyhow = "1.0.104"
 crossterm = "0.29.0"
 dirs = "7.0.0"

@@ -2,12 +2,15 @@ mod app;
 mod config;
 mod hook;
 mod input;
+mod integrations;
 mod keys;
 mod menu;
 mod notify;
+mod persist;
 mod session;
 mod status;
 mod textfield;
+mod theme;
 mod ui;
 
 use anyhow::Result;
@@ -21,6 +24,8 @@ Radar — несколько AI-агентов в одном окне терми
   radar [папка] [агент ...]  открыть интерфейс
   radar doctor               проверить, какие агенты установлены
   radar notify-test          проверить уведомления, иконку и звук
+  radar integration [install|uninstall <агент>|all]
+                             точные статусы агентов через хуки (или экран «Интеграции»)
   radar --help | --version
 
 Примеры:
@@ -51,6 +56,52 @@ fn doctor() -> Result<()> {
     Ok(())
 }
 
+fn integration_cmd(args: &[String]) -> Result<()> {
+    let cfg = config::Config::load();
+    let ids: Vec<(String, String)> = cfg
+        .agents
+        .iter()
+        .map(|a| (integrations::key(&a.command), a.name.clone()))
+        .filter(|(k, _)| integrations::supported(k))
+        .collect();
+    let act = args.first().map(String::as_str);
+    if matches!(act, Some("install") | Some("uninstall")) {
+        let targets = &args[1..];
+        let list: Vec<String> = if targets.iter().any(|t| t == "all") {
+            integrations::installable().iter().map(|s| s.to_string()).collect()
+        } else if targets.is_empty() {
+            eprintln!("radar integration {} <агент ...|all>", act.unwrap());
+            std::process::exit(2);
+        } else {
+            targets.to_vec()
+        };
+        for id in list {
+            let r = if act == Some("install") {
+                integrations::install(&id).map(|p| format!("установлено → {}", p.display()))
+            } else {
+                integrations::uninstall(&id).map(|_| "удалено".to_string())
+            };
+            match r {
+                Ok(m) => println!("  ✓ {id}: {m}"),
+                Err(e) => println!("  ✗ {id}: {e}"),
+            }
+        }
+        println!("Уже запущенным агентам нужен перезапуск.");
+        return Ok(());
+    }
+    println!("Интеграции агентов (прямые статусы вместо разбора экрана):\n");
+    for (id, name) in ids {
+        let mark = match integrations::state(&id) {
+            integrations::State::Builtin => "✓ встроено",
+            integrations::State::Installed => "✓ включено",
+            integrations::State::NotInstalled => "– выключено",
+        };
+        println!("  {name:<14} {mark:<12} {}", integrations::describe(&id));
+    }
+    println!("\nВключить: radar integration install <агент|all>   Выключить: radar integration uninstall <агент|all>");
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -67,6 +118,7 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("doctor") => return doctor(),
+        Some("integration") | Some("integrations") => return integration_cmd(&args[1..]),
         Some("notify-test") => {
             let cfg = config::Config::load();
             notify::self_test(&notify::Settings {
@@ -111,10 +163,14 @@ fn main() -> Result<()> {
 
     let mut app = app::App::new(cfg, start_dir.clone(), tx, ctx);
     let mut errors = vec![];
+    let autostart_empty = autostart.is_empty();
     for def in autostart {
         if let Err(e) = app.create_session(def, start_dir.clone(), None, false) {
             errors.push(e.to_string());
         }
+    }
+    if autostart_empty {
+        app.restore_sessions();
     }
     if let Some(e) = errors.first() {
         app.toast(format!("Не удалось запустить: {e}"));

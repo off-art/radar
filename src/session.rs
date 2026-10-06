@@ -58,6 +58,8 @@ pub struct Session {
     pub muted: bool,
     pub size: (u16, u16),
     pub hooks_seen: bool,
+    /// Идентификатор диалога Claude Code (для восстановления после перезапуска Radar).
+    pub resume_id: Option<String>,
     submitted: bool,
     typed: String,
     last_activity: Instant,
@@ -78,13 +80,22 @@ pub fn find_binary(bin: &str) -> Option<String> {
         return Some(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
     }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    std::process::Command::new(shell)
-        .args(["-l", "-i", "-c", &format!("command -v {}", shq(bin))])
+    use std::os::unix::process::CommandExt;
+    let mut cmd = std::process::Command::new(shell);
+    // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
+    // получает SIGTTOU («suspended (tty output)»). setsid отрезает его от управляющего терминала.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    cmd.args(["-l", "-i", "-c", &format!("command -v {}", shq(bin))])
         .env("SHELL_SESSIONS_DISABLE", "1")
         .env_remove("TERM_SESSION_ID")
         .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
+        .stderr(std::process::Stdio::null());
+    cmd.output()
         .ok()
         .filter(|o| o.status.success())
         // шелл может напечатать приветствие — путь всегда в последней строке
@@ -136,6 +147,7 @@ impl Session {
         size: (u16, u16),
         tx: Sender<Msg>,
         ctx: &SpawnCtx,
+        resume: Option<&str>,
     ) -> Result<Session> {
         let (rows, cols) = size;
         let pair = native_pty_system()
@@ -161,6 +173,10 @@ impl Session {
                 if let Some(s) = &ctx.claude_settings {
                     line.push_str(" --settings ");
                     line.push_str(&shq(&s.to_string_lossy()));
+                }
+                if let Some(r) = resume {
+                    line.push_str(" --resume ");
+                    line.push_str(&shq(r));
                 }
             }
             // login + interactive: подхватываем PATH из .zprofile/.zshrc (nvm, brew и т.п.)
@@ -240,6 +256,7 @@ impl Session {
             muted: false,
             size,
             hooks_seen: false,
+            resume_id: resume.map(String::from),
             submitted: false,
             typed: String::new(),
             last_activity: now,
@@ -418,7 +435,22 @@ impl Session {
         }
         self.hooks_seen = true;
         let str_of = |k: &str| payload.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // события Gemini CLI приводим к общим именам
+        let event = match event {
+            "BeforeAgent" => "UserPromptSubmit",
+            "BeforeTool" => "PreToolUse",
+            "AfterTool" => "PostToolUse",
+            "AfterAgent" => "Stop",
+            e => e,
+        };
         match event {
+            "PermissionRequest" => {
+                let m = str_of("message");
+                if !m.is_empty() {
+                    self.note = m.chars().take(160).collect();
+                }
+                self.set_status(Status::Waiting)
+            }
             "SessionStart" => self.set_status(Status::Idle),
             "UserPromptSubmit" => {
                 let p = str_of("prompt");
@@ -426,6 +458,12 @@ impl Session {
                     self.subtitle = p.trim().chars().take(160).collect();
                 }
                 self.submitted = true;
+                if self.kind == Kind::Claude {
+                    let id = str_of("session_id");
+                    if !id.is_empty() {
+                        self.resume_id = Some(id);
+                    }
+                }
                 self.unread = false;
                 self.set_status(Status::Working)
             }
