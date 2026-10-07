@@ -18,6 +18,7 @@ mod status;
 mod textfield;
 mod theme;
 mod ui;
+mod update;
 
 use anyhow::Result;
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ Radar — несколько AI-агентов в одном окне терми
 Использование:
   radar [папка] [агент ...]  открыть интерфейс
   radar doctor               проверить, какие агенты установлены
+  radar update [--check]     обновить Radar до последней версии (--check — только проверить)
   radar notify-test          проверить уведомления, иконку и звук
   radar integration [install|uninstall <агент>|all]
                              точные статусы агентов через хуки (или экран «Интеграции»)
@@ -124,6 +126,13 @@ fn main() -> Result<()> {
             return Ok(());
         }
         Some("doctor") => return doctor(),
+        Some("update") => {
+            if let Err(e) = update::run_update(args.get(1).map(String::as_str) == Some("--check")) {
+                eprintln!("radar update: {e:#}");
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
         Some("integration") | Some("integrations") => return integration_cmd(&args[1..]),
         Some("notify-test") => {
             let cfg = config::Config::load();
