@@ -70,10 +70,9 @@ pub fn run_client(event: &str) {
     let mut input = String::new();
     let _ = std::io::stdin().take(1 << 20).read_to_string(&mut input);
     log_event(event, &input);
-    let (Ok(sock), Ok(sess)) = (
-        std::env::var("RADAR_SOCK"),
-        std::env::var("RADAR_SESSION"),
-    ) else {
+    // события идут через процесс-хозяин агента: он переживёт перезапуск окна Radar
+    let sock = std::env::var("RADAR_HOST_SOCK").or_else(|_| std::env::var("RADAR_SOCK"));
+    let (Ok(sock), Ok(sess)) = (sock, std::env::var("RADAR_SESSION")) else {
         return;
     };
     let payload: Value = serde_json::from_str(&input).unwrap_or(Value::Null);

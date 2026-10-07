@@ -2,10 +2,10 @@
 
 use crate::config::{AgentDef, Kind};
 use crate::status::{self, Signals, Status};
-use anyhow::{Context, Result};
-use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use anyhow::Result;
 use ratatui::style::Color;
-use std::io::{Read, Write};
+use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -80,8 +80,24 @@ pub struct Session {
     last_activity: Instant,
     ignore_until: Instant,
     writer: Writer,
-    master: Box<dyn MasterPty + Send>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Соединение с процессом-хозяином агента (см. `host.rs`).
+    conn: Arc<Mutex<UnixStream>>,
+    /// Что хозяин уже знает об имени/диалоге/звуке (чтобы отправлять только изменения).
+    meta_sent: (String, Option<String>, bool),
+}
+
+/// Ввод в агента уходит хозяину кадрами `I`.
+struct FrameWriter(Arc<Mutex<UnixStream>>);
+
+impl Write for FrameWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut c = self.0.lock().unwrap();
+        crate::host::write_frame(&mut *c, b'I', buf)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 pub fn shq(s: &str) -> String {
@@ -123,32 +139,22 @@ pub fn find_binary(bin: &str) -> Option<String> {
         })
 }
 
-fn contains(hay: &[u8], needle: &[u8]) -> bool {
-    hay.windows(needle.len()).any(|w| w == needle)
-}
-
-/// Отвечает на запросы терминалу (DA, DSR), на которые агенты иногда ждут ответ.
-fn answer_queries(data: &[u8], writer: &Writer, parser: &Arc<Mutex<vt100::Parser>>) {
-    let mut reply: Vec<u8> = Vec::new();
-    if contains(data, b"\x1b[c") || contains(data, b"\x1b[0c") {
-        reply.extend_from_slice(b"\x1b[?62;c");
+/// Отдаёт вывод агента эмулятору. Эмулятор не умеет `CSI 3 J` («очистить и историю прокрутки») — а именно её
+/// шлют агенты по `/clear` (GigaCode, Qwen, Gemini). Поэтому после неё история сбрасывается вручную:
+/// эмулятор пересоздаётся с тем же видимым экраном.
+pub fn feed(parser: &mut vt100::Parser, data: &[u8]) {
+    const CLEAR_HISTORY: &[u8] = b"\x1b[3J";
+    let mut rest = data;
+    while let Some(pos) = rest.windows(CLEAR_HISTORY.len()).position(|w| w == CLEAR_HISTORY) {
+        let end = pos + CLEAR_HISTORY.len();
+        parser.process(&rest[..end]);
+        let (rows, cols) = parser.screen().size();
+        let screen = parser.screen().state_formatted();
+        *parser = vt100::Parser::new(rows, cols, 5000);
+        parser.process(&screen);
+        rest = &rest[end..];
     }
-    if contains(data, b"\x1b[>c") || contains(data, b"\x1b[>0c") {
-        reply.extend_from_slice(b"\x1b[>0;0;0c");
-    }
-    if contains(data, b"\x1b[5n") {
-        reply.extend_from_slice(b"\x1b[0n");
-    }
-    if contains(data, b"\x1b[6n") {
-        let (r, c) = parser.lock().unwrap().screen().cursor_position();
-        reply.extend_from_slice(format!("\x1b[{};{}R", r + 1, c + 1).as_bytes());
-    }
-    if !reply.is_empty() {
-        if let Ok(mut w) = writer.lock() {
-            let _ = w.write_all(&reply);
-            let _ = w.flush();
-        }
-    }
+    parser.process(rest);
 }
 
 impl Session {
@@ -165,19 +171,9 @@ impl Session {
         resume: Option<&str>,
     ) -> Result<Session> {
         let (rows, cols) = size;
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .context("не удалось открыть pty")?;
-
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        let mut cmd = CommandBuilder::new(&shell);
-        if def.kind == Kind::Shell {
-            cmd.arg("-l");
+        let args: Vec<String> = if def.kind == Kind::Shell {
+            vec!["-l".into()]
         } else {
             let mut line = format!("exec {}", def.command);
             for a in &def.args {
@@ -195,70 +191,100 @@ impl Session {
                 }
             }
             // login + interactive: подхватываем PATH из .zprofile/.zshrc (nvm, brew и т.п.)
-            cmd.args(["-l", "-i", "-c", &line]);
+            vec!["-l".into(), "-i".into(), "-c".into(), line]
+        };
+        let sock = crate::host::new_sock_path(id);
+        let sv = |s: &str| s.to_string();
+        let spec = crate::host::Spec {
+            sock: sock.clone(),
+            shell,
+            args,
+            env: vec![
+                (sv("TERM"), sv("xterm-256color")),
+                (sv("COLORTERM"), sv("truecolor")),
+                (sv("RADAR_SESSION"), id.to_string()),
+                (sv("RADAR_SOCK"), ctx.sock.to_string_lossy().to_string()),
+                // события хуков идут через хозяина агента — он переживёт перезапуск окна Radar
+                (sv("RADAR_HOST_SOCK"), sock.to_string_lossy().to_string()),
+                // Не наследуем переменные терминала-родителя (Apple Terminal печатает «Restored session…»,
+                // агенты могут принять Radar за iTerm/VS Code).
+                (sv("TERM_PROGRAM"), sv("radar")),
+                (sv("SHELL_SESSIONS_DISABLE"), sv("1")),
+            ],
+            env_remove: ["CLAUDECODE", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "ITERM_SESSION_ID", "WARP_SESSION_ID"]
+                .iter()
+                .map(|k| k.to_string())
+                .collect(),
+            meta: crate::host::Meta {
+                id,
+                name,
+                agent: def.name.clone(),
+                cwd,
+                worktree,
+                rows,
+                cols,
+                resume_id: resume.map(String::from),
+                muted: false,
+            },
+        };
+        crate::host::launch(&spec)?;
+        match crate::host::attach(&sock)? {
+            Some((meta, stream)) => Ok(Session::from_host(def, meta, stream, tx)),
+            None => Err(anyhow::anyhow!("агент уже подключён к другому окну")),
         }
-        cmd.cwd(&cwd);
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("RADAR_SESSION", id.to_string());
-        cmd.env("RADAR_SOCK", &ctx.sock);
-        cmd.env_remove("CLAUDECODE");
-        // Не наследуем переменные терминала-родителя: иначе zsh в Apple Terminal печатает
-        // «Restored session…», а агенты могут принять Radar за iTerm/VS Code.
-        for k in ["TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "ITERM_SESSION_ID", "WARP_SESSION_ID"] {
-            cmd.env_remove(k);
-        }
-        cmd.env("TERM_PROGRAM", "radar");
-        cmd.env("SHELL_SESSIONS_DISABLE", "1");
+    }
 
-        let mut child = pair
-            .slave
-            .spawn_command(cmd)
-            .with_context(|| format!("не удалось запустить {shell}"))?;
-        drop(pair.slave);
-
-        let mut reader = pair.master.try_clone_reader()?;
-        let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer()?));
-        let killer = child.clone_killer();
+    /// Собирает сессию по метаданным и соединению с хозяином (новый агент или подключение к работающему).
+    pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Session {
+        let id = meta.id;
+        let (rows, cols) = (meta.rows, meta.cols);
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 5000)));
-
+        let conn = Arc::new(Mutex::new(stream.try_clone().expect("клонирование сокета")));
+        let writer: Writer = Arc::new(Mutex::new(Box::new(FrameWriter(conn.clone()))));
         {
             let parser = parser.clone();
-            let writer = writer.clone();
-            let tx = tx.clone();
+            let mut stream = stream;
             std::thread::spawn(move || {
-                let mut buf = [0u8; 16 * 1024];
                 loop {
-                    match reader.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            parser.lock().unwrap().process(&buf[..n]);
-                            answer_queries(&buf[..n], &writer, &parser);
+                    match crate::host::read_frame(&mut stream) {
+                        Ok(Some((b'O', data))) => {
+                            feed(&mut parser.lock().unwrap(), &data);
                             if tx.send(Msg::Output(id)).is_err() {
                                 break;
                             }
+                        }
+                        Ok(Some((b'X', d))) if d.len() == 4 => {
+                            let code = i32::from_be_bytes([d[0], d[1], d[2], d[3]]);
+                            let _ = tx.send(Msg::Exited(id, code));
+                        }
+                        Ok(Some((b'H', d))) => {
+                            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&d) {
+                                let _ = tx.send(Msg::Hook {
+                                    session: id,
+                                    event: v.get("event").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                                    payload: v.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+                                });
+                            }
+                        }
+                        Ok(Some(_)) => {}
+                        // хозяин пропал (например, `radar stop` из другого окна)
+                        Ok(None) | Err(_) => {
+                            let _ = tx.send(Msg::Exited(id, -1));
+                            break;
                         }
                     }
                 }
             });
         }
-        {
-            let tx = tx.clone();
-            std::thread::spawn(move || {
-                let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
-                let _ = tx.send(Msg::Exited(id, code));
-            });
-        }
-
         let now = Instant::now();
-        Ok(Session {
+        Session {
             id,
-            name,
+            name: meta.name.clone(),
             agent: def.name.clone(),
             color: def.color,
             kind: def.kind,
-            cwd,
-            worktree,
+            cwd: meta.cwd,
+            worktree: meta.worktree,
             parser,
             status: Status::Starting,
             status_since: now,
@@ -269,19 +295,49 @@ impl Session {
             exit_code: None,
             scroll: 0,
             unread: false,
-            muted: false,
-            size,
+            muted: meta.muted,
+            size: (rows, cols),
             hooks_seen: false,
             git: None,
-            resume_id: resume.map(String::from),
+            resume_id: meta.resume_id.clone(),
             submitted: false,
             typed: String::new(),
             last_activity: now,
             ignore_until: now,
             writer,
-            master: pair.master,
-            killer,
-        })
+            conn,
+            meta_sent: (meta.name, meta.resume_id, meta.muted),
+        }
+    }
+
+    /// Сообщает хозяину об изменении имени, диалога Claude или признака «тишина».
+    pub fn sync_meta(&mut self) {
+        let cur = (self.name.clone(), self.resume_id.clone(), self.muted);
+        if cur == self.meta_sent {
+            return;
+        }
+        let meta = crate::host::Meta {
+            id: self.id,
+            name: cur.0.clone(),
+            agent: self.agent.clone(),
+            cwd: self.cwd.clone(),
+            worktree: self.worktree.clone(),
+            rows: self.size.0,
+            cols: self.size.1,
+            resume_id: cur.1.clone(),
+            muted: cur.2,
+        };
+        if let Ok(mut c) = self.conn.lock() {
+            let _ = crate::host::write_frame(&mut *c, b'U', &serde_json::to_vec(&meta).unwrap_or_default());
+        }
+        self.meta_sent = cur;
+    }
+
+    /// Отключается от агента, не останавливая его (выход из Radar).
+    pub fn detach(&mut self) {
+        if let Ok(c) = self.conn.lock() {
+            let _ = c.shutdown(std::net::Shutdown::Both);
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -385,14 +441,12 @@ impl Session {
             return;
         }
         self.size = (rows, cols);
-        let _ = self.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        });
+        if let Ok(mut c) = self.conn.lock() {
+            let mut d = rows.to_be_bytes().to_vec();
+            d.extend_from_slice(&cols.to_be_bytes());
+            let _ = crate::host::write_frame(&mut *c, b'R', &d);
+        }
         self.parser.lock().unwrap().screen_mut().set_size(rows, cols);
-        self.ignore_until = Instant::now() + Duration::from_millis(1500);
     }
 
     /// Вызывается, когда агент что-то вывел.
@@ -403,8 +457,11 @@ impl Session {
         }
     }
 
+    /// Останавливает агента и его хозяина.
     pub fn kill(&mut self) {
-        let _ = self.killer.kill();
+        if let Ok(mut c) = self.conn.lock() {
+            let _ = crate::host::write_frame(&mut *c, b'Q', b"");
+        }
     }
 
     pub fn mark_exited(&mut self, code: i32) -> Option<Attention> {
@@ -697,5 +754,49 @@ mod excerpt_tests {
         let e = excerpt(&rows);
         assert_eq!(e.len(), 8);
         assert_eq!(e.last().unwrap(), "строка 29");
+    }
+}
+
+#[cfg(test)]
+mod clear_tests {
+    use super::*;
+
+    fn history(p: &mut vt100::Parser) -> usize {
+        p.screen_mut().set_scrollback(usize::MAX);
+        let n = p.screen().scrollback();
+        p.screen_mut().set_scrollback(0);
+        n
+    }
+
+    #[test]
+    fn clear_history_sequence_drops_scrollback() {
+        let mut p = vt100::Parser::new(10, 40, 5000);
+        for i in 0..100 {
+            feed(&mut p, format!("old line {i}\r\n").as_bytes());
+        }
+        assert!(history(&mut p) > 50);
+        feed(&mut p, b"\x1b[2J\x1b[3J\x1b[Hnew start");
+        assert_eq!(history(&mut p), 0);
+        assert!(p.screen().contents().contains("new start"));
+        assert!(!p.screen().contents().contains("old line 99"));
+    }
+
+    #[test]
+    fn plain_output_keeps_scrollback() {
+        let mut p = vt100::Parser::new(10, 40, 5000);
+        for i in 0..100 {
+            feed(&mut p, format!("line {i}\r\n").as_bytes());
+        }
+        assert!(history(&mut p) > 50);
+    }
+
+    #[test]
+    fn clear_history_alone_drops_scrollback() {
+        let mut p = vt100::Parser::new(5, 20, 100);
+        for i in 0..30 {
+            feed(&mut p, format!("x{i}\r\n").as_bytes());
+        }
+        feed(&mut p, b"\x1b[3J");
+        assert_eq!(history(&mut p), 0);
     }
 }

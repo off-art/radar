@@ -8,6 +8,7 @@ mod events;
 mod git;
 mod gitops;
 mod hook;
+mod host;
 mod input;
 mod integrations;
 mod keys;
@@ -30,6 +31,7 @@ Radar — несколько AI-агентов в одном окне терми
 
 Использование:
   radar [папка] [агент ...]  открыть интерфейс
+  radar stop                 остановить всех агентов, работающих в фоне
   radar doctor               проверить, какие агенты установлены
   radar ctl <команда>        управлять запущенным Radar из скриптов (radar ctl --help)
   radar update [--check]     обновить Radar до последней версии (--check — только проверить)
@@ -137,6 +139,16 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Some("host") => return host::run_host(),
+        Some("stop") => {
+            let n = host::stop_all();
+            if n == 0 {
+                println!("Работающих агентов нет.");
+            } else {
+                println!("Остановлено агентов: {n}.");
+            }
+            return Ok(());
+        }
         Some("doctor") => return doctor(),
         Some("update") => {
             if let Err(e) = update::run_update(args.get(1).map(String::as_str) == Some("--check")) {
@@ -191,12 +203,13 @@ fn main() -> Result<()> {
     let mut app = app::App::new(cfg, start_dir.clone(), tx, ctx);
     let mut errors = vec![];
     let autostart_empty = autostart.is_empty();
+    let background = app.attach_existing();
     for def in autostart {
         if let Err(e) = app.create_session(def, start_dir.clone(), None, false) {
             errors.push(e.to_string());
         }
     }
-    if autostart_empty {
+    if autostart_empty && background == 0 {
         app.restore_sessions();
     }
     if let Some(e) = errors.first() {

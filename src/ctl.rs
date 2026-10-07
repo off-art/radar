@@ -68,8 +68,14 @@ pub fn resolve(items: &[(u32, String)], target: &str) -> Result<u32, String> {
 
 /// Сокет работающего Radar: из `RADAR_SOCK` или самый свежий живой `radar-*.sock`.
 pub fn find_socket(explicit: Option<String>) -> Result<PathBuf> {
-    if let Some(p) = explicit.or_else(|| std::env::var("RADAR_SOCK").ok()).filter(|p| !p.is_empty()) {
+    if let Some(p) = explicit.clone() {
         return Ok(PathBuf::from(p));
+    }
+    // RADAR_SOCK внутри агента мог остаться от закрытого окна — берём, только если там кто-то слушает
+    if let Some(p) = std::env::var("RADAR_SOCK").ok().filter(|p| !p.is_empty()) {
+        if UnixStream::connect(&p).is_ok() {
+            return Ok(PathBuf::from(p));
+        }
     }
     let base = dirs::runtime_dir().unwrap_or_else(std::env::temp_dir);
     let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&base)

@@ -143,7 +143,11 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
 
     for y in area.y..area.bottom() {
         if let Some(c) = buf.cell_mut((area.right() - 1, y)) {
-            c.set_symbol("│").set_style(Style::default().fg(th.line));
+            if app.divider_drag {
+                c.set_symbol("┃").set_style(Style::default().fg(th.accent));
+            } else {
+                c.set_symbol("│").set_style(Style::default().fg(th.line));
+            }
         }
     }
     let w = area.width as usize - 1;
@@ -938,69 +942,114 @@ fn draw_approve(f: &mut Frame, app: &App, i: usize, note: &str, sel: Option<usiz
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Содержимое окна подтверждения: заголовок, что именно, пояснение, предупреждение, название кнопки «да».
+struct ConfirmView {
+    title: String,
+    subject: String,
+    detail: Option<String>,
+    warn: Option<String>,
+    yes: &'static str,
+}
+
+fn confirm_view(app: &App, c: &Confirm) -> ConfirmView {
+    let v = |title: &str, subject: String, yes: &'static str| ConfirmView {
+        title: title.to_string(),
+        subject,
+        detail: None,
+        warn: None,
+        yes,
+    };
+    let session = |i: usize| app.sessions.get(i);
+    let name = |i: usize| session(i).map(|s| format!("{} · {}", s.name, s.agent)).unwrap_or_default();
+    let branch = |i: usize| session(i).and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
+    let dirty = |i: usize| session(i).and_then(|s| s.git.as_ref()).map_or(false, |g| g.dirty());
+    let running = app.sessions.iter().filter(|s| s.is_running()).count();
+    match c {
+        Confirm::Close(i) => {
+            let mut x = v("Закрыть агента?", name(*i), "Закрыть");
+            match session(*i).map(|s| s.status) {
+                Some(Status::Working) => x.warn = Some("Агент сейчас работает — работа прервётся".into()),
+                Some(Status::Waiting) => x.warn = Some("Агент ждёт ответа".into()),
+                _ => {}
+            }
+            x
+        }
+        Confirm::Push(i) => {
+            let mut x = v("Отправить ветку?", format!("⎇ {}", branch(*i)), "Отправить");
+            x.detail = Some("git push на сервер".into());
+            x
+        }
+        Confirm::Merge(i) => {
+            let mut x = v("Влить ветку?", format!("⎇ {}  →  основной репозиторий", branch(*i)), "Влить");
+            x.detail = Some("merge --no-ff; при конфликте слияние откатится".into());
+            if dirty(*i) {
+                x.warn = Some("Незакоммиченные изменения в слияние не войдут".into());
+            }
+            x
+        }
+        Confirm::RemoveWorktree(i) => {
+            let mut x = v("Удалить worktree?", name(*i), "Удалить");
+            x.detail = Some("Агент закроется; ветка удалится, если уже влита".into());
+            if dirty(*i) {
+                x.warn = Some("Незакоммиченные изменения пропадут".into());
+            }
+            x
+        }
+        Confirm::Quit => {
+            let mut x = v("Выйти из Radar?", "Окно закроется".into(), "Выйти");
+            if running > 0 {
+                x.subject = format!("Агентов в фоне: {running}");
+                x.detail = Some("Продолжат работать; остановить — radar stop".into());
+            }
+            x
+        }
+        Confirm::QuitStop => {
+            let mut x = v("Остановить всех агентов?", format!("Агентов: {running}"), "Остановить");
+            x.detail = Some("Все процессы завершатся, затем Radar закроется".into());
+            x
+        }
+        Confirm::Approve(..) => v("", String::new(), ""),
+    }
+}
+
 fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
     if let Confirm::Approve(i, note, sel) = c {
         return draw_approve(f, app, *i, note, *sel);
     }
     let th = &app.theme;
-    let text = match c {
-        Confirm::Close(i) => {
-            let name = app.sessions.get(*i).map(|s| s.name.clone()).unwrap_or_default();
-            format!("Закрыть агента «{name}» и остановить его процесс?")
-        }
-        Confirm::Push(i) => {
-            let b = app.sessions.get(*i).and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
-            format!("Отправить ветку «{b}» на сервер (git push)?")
-        }
-        Confirm::Merge(i) => {
-            let s = app.sessions.get(*i);
-            let b = s.and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
-            let dirty = s.and_then(|s| s.git.as_ref()).map(|g| g.dirty()).unwrap_or(false);
-            let mut t = format!("Влить «{b}» в текущую ветку основного репозитория (merge --no-ff)?");
-            if dirty {
-                t.push_str("\nВнимание: незакоммиченные изменения в слияние не войдут.");
-            }
-            t
-        }
-        Confirm::RemoveWorktree(i) => {
-            let s = app.sessions.get(*i);
-            let name = s.map(|s| s.name.clone()).unwrap_or_default();
-            let dirty = s.and_then(|s| s.git.as_ref()).map(|g| g.dirty()).unwrap_or(false);
-            let mut t = format!("Закрыть агента «{name}» и удалить его worktree (ветка — только если влита)?");
-            if dirty {
-                t.push_str("\nВнимание: незакоммиченные изменения пропадут.");
-            }
-            t
-        }
-        Confirm::Approve(i, note, _) => {
-            let s = app.sessions.get(*i);
-            let who = s.map(|s| format!("{} · {}", s.agent, s.name)).unwrap_or_default();
-            format!("{who} просит разрешение:\n\n{note}\n\nРазрешить один раз?")
-        }
-        Confirm::Quit => {
-            let n = app.sessions.iter().filter(|s| s.is_running()).count();
-            if n > 0 {
-                format!("Выйти? Работающие агенты ({n}) будут остановлены.")
-            } else {
-                "Выйти из Radar?".to_string()
-            }
-        }
-    };
-    let body: Vec<&str> = text.lines().collect();
-    let wmax = body.iter().map(|l| l.width()).max().unwrap_or(0).max(48) as u16; // не уже подвала с подсказкой клавиш
-    let r = centered(f.area(), wmax + 6, body.len() as u16 + 4);
+    let cv = confirm_view(app, c);
+    let foot = format!(" Enter  {}      Esc  Отмена ", cv.yes);
+    let mut body_w = cv.subject.width().max(foot.width());
+    for t in [&cv.detail, &cv.warn].into_iter().flatten() {
+        body_w = body_w.max(t.width() + 2);
+    }
+    let rows = 3 + cv.detail.is_some() as u16 + cv.warn.is_some() as u16 + 1;
+    let r = centered(f.area(), (body_w.max(34) as u16 + 6).min(f.area().width), rows + 2);
     clear(f, r, th);
-    let block = popup_block(th, "Подтверждение");
+    let block = popup_block(th, &cv.title);
     let inner = block.inner(r);
     f.render_widget(block, r);
-    let mut lines: Vec<Line> = body.iter().map(|l| Line::from(l.to_string())).collect();
+    let mut lines = vec![Line::from(Span::styled(
+        format!(" {}", cv.subject),
+        Style::default().fg(th.text).add_modifier(Modifier::BOLD),
+    ))];
+    if let Some(d) = &cv.detail {
+        lines.push(Line::from(Span::styled(format!(" {d}"), Style::default().fg(th.dim))));
+    }
+    if let Some(w) = &cv.warn {
+        lines.push(Line::from(Span::styled(format!(" ⚠ {w}"), Style::default().fg(th.yellow))));
+    }
     lines.push(Line::from(""));
-    let foot = if matches!(c, Confirm::Approve(..)) {
-        "y — разрешить · любая другая клавиша — отмена"
-    } else {
-        "y / Enter — да · любая другая клавиша — отмена"
-    };
-    lines.push(Line::from(Span::styled(foot, Style::default().fg(th.dim))));
+    let key = Style::default().fg(th.on_color).bg(th.accent).add_modifier(Modifier::BOLD);
+    let txt = Style::default().fg(th.text);
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(" Enter ", key),
+        Span::styled(format!(" {}", cv.yes), txt),
+        Span::raw("      "),
+        Span::styled(" Esc ", Style::default().fg(th.on_color).bg(th.dim)),
+        Span::styled(" Отмена", txt),
+    ]));
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -1028,7 +1077,8 @@ fn draw_help(f: &mut Frame, app: &App) {
         ("  ,".into(), "настройки: цветовая схема, звук, ширина списка"),
         ("  u / d, PgUp / PgDn".into(), "прокрутка истории агента"),
         ("  p или Space".into(), "палитра команд (поиск по действиям и агентам)"),
-        ("  q".into(), "выход"),
+        ("  q".into(), "выход (агенты продолжат работать в фоне)"),
+        ("  Q".into(), "остановить всех агентов и выйти (то же — radar stop)"),
         (format!("{p} {p}"), "отправить агенту сам префикс"),
         ("Shift+↑ / Shift+↓".into(), "переключить агента без префикса (настраивается)"),
     ];

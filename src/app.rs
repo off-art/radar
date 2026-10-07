@@ -55,6 +55,7 @@ impl Selection {
 pub enum Confirm {
     Close(usize),
     Quit,
+    QuitStop,
     Push(usize),
     Merge(usize),
     RemoveWorktree(usize),
@@ -139,6 +140,8 @@ pub struct App {
     pub toast: Option<(String, Instant)>,
     pub notifications: bool,
     pub quit: bool,
+    /// При выходе остановить и агентов (иначе они продолжают работать в фоне).
+    pub stop_on_quit: bool,
     /// Последний записанный список агентов (чтобы не писать файл зря).
     persisted: String,
     pub events: crate::events::Log,
@@ -148,6 +151,8 @@ pub struct App {
     press: Option<(usize, Rect, u16, u16, KeyModifiers)>,
     /// Агент, которого тянут мышью по списку (перестановка).
     drag_item: Option<usize>,
+    /// Идёт перетаскивание границы между списком агентов и окном агента.
+    pub divider_drag: bool,
     git: crate::git::Watcher,
     pub dirty: bool,
     pub started: Instant,
@@ -255,11 +260,13 @@ impl App {
             toast: None,
             notifications,
             quit: false,
+            stop_on_quit: false,
             persisted: String::new(),
             events: Default::default(),
             sel: None,
             press: None,
             drag_item: None,
+            divider_drag: false,
             git: crate::git::Watcher::start(tx.clone()),
             dirty: true,
             started: Instant::now(),
@@ -490,6 +497,44 @@ impl App {
         }
     }
 
+    /// Подключается к агентам, которые продолжали работать в фоне после закрытия Radar.
+    /// Возвращает, сколько фоновых агентов найдено (включая занятых другим окном).
+    pub fn attach_existing(&mut self) -> usize {
+        let socks = crate::host::live_sockets();
+        let (mut busy, mut unknown) = (0, 0);
+        let mut found: Vec<Session> = vec![];
+        for sock in &socks {
+            match crate::host::attach(sock) {
+                Ok(Some((meta, stream))) => {
+                    let Some(def) = self.cfg.agents.iter().find(|a| a.name == meta.agent).cloned() else {
+                        unknown += 1;
+                        continue; // агента убрали из конфига — не трогаем
+                    };
+                    found.push(Session::from_host(&def, meta, stream, self.tx.clone()));
+                }
+                Ok(None) => busy += 1,
+                Err(_) => {}
+            }
+        }
+        // порядок — как в прошлый раз (сохранённый список), новые агенты в конец
+        let saved = crate::persist::load();
+        found.sort_by_key(|s| saved.sessions.iter().position(|sv| sv.name == s.name).unwrap_or(usize::MAX));
+        for s in found {
+            self.next_id = self.next_id.max(s.id + 1);
+            self.sessions.push(s);
+        }
+        if !self.sessions.is_empty() {
+            self.selected = saved.selected.min(self.sessions.len() - 1);
+        }
+        if busy > 0 {
+            self.toast(format!("Агентов в другом окне Radar: {busy} — они здесь не показаны"));
+        } else if unknown > 0 {
+            self.toast(format!("Фоновых агентов не из этого конфига: {unknown} — они продолжают работать (radar stop — остановить)"));
+        }
+        self.dirty = true;
+        socks.len()
+    }
+
     /// Поднимает агентов, сохранённых при прошлом закрытии Radar.
     pub fn restore_sessions(&mut self) {
         if !self.cfg.restore {
@@ -574,7 +619,8 @@ impl App {
         match Session::spawn(id, &def, name, cwd, wt, self.pane_size(), self.tx.clone(), &self.ctx, resume.as_deref()) {
             Ok(mut s) => {
                 s.muted = muted;
-                self.sessions[idx] = s;
+                let mut old = std::mem::replace(&mut self.sessions[idx], s);
+                old.kill(); // освобождает хозяина завершившегося агента
             }
             Err(e) => self.toast(format!("Не удалось перезапустить: {e}")),
         }
@@ -595,7 +641,12 @@ impl App {
 
     pub fn shutdown(&mut self) {
         for s in &mut self.sessions {
-            s.kill();
+            if self.stop_on_quit {
+                s.kill();
+            } else {
+                s.sync_meta();
+                s.detach();
+            }
         }
     }
 
@@ -810,6 +861,7 @@ impl App {
             self.sessions.iter().filter(|s| s.is_running()).map(|s| (s.id, s.cwd.clone())).collect(),
         );
         for i in 0..self.sessions.len() {
+            self.sessions[i].sync_meta();
             let before = self.sessions[i].status;
             if let Some(a) = self.sessions[i].tick() {
                 self.handle_attention(i, a);
@@ -1032,6 +1084,7 @@ impl App {
             Action::Palette => self.open_palette(),
             Action::Help => self.mode = Mode::Help,
             Action::Quit => self.mode = Mode::Confirm(Confirm::Quit),
+            Action::QuitStop => self.mode = Mode::Confirm(Confirm::QuitStop),
             _ => {}
         }
     }
@@ -1118,7 +1171,8 @@ impl App {
         }
         e.push(PaletteEntry { title: "Интеграции агентов: точные статусы через хуки".into(), hint: String::new(), action: Action::Integrations });
         e.push(PaletteEntry { title: "Помощь и горячие клавиши".into(), hint: "?".into(), action: Action::Help });
-        e.push(PaletteEntry { title: "Выйти из Radar".into(), hint: "q".into(), action: Action::Quit });
+        e.push(PaletteEntry { title: "Выйти из Radar (агенты продолжат работать)".into(), hint: "q".into(), action: Action::Quit });
+        e.push(PaletteEntry { title: "Остановить всех агентов и выйти".into(), hint: "Q".into(), action: Action::QuitStop });
         self.mode = Mode::Palette(Palette { input: TextField::default(), entries: e, sel: 0 });
     }
 
@@ -1205,7 +1259,8 @@ impl App {
             MenuItem::new("Настройки…", Action::Settings, ","),
             MenuItem::new("Интеграции агентов…", Action::Integrations, ""),
             MenuItem::new("Помощь", Action::Help, "?"),
-            MenuItem::new("Выйти", Action::Quit, "q"),
+            MenuItem::new("Выйти (агенты продолжат работать)", Action::Quit, "q"),
+            MenuItem::new("Остановить всех агентов и выйти", Action::QuitStop, "Q"),
         ]);
         Menu::new(x, y, items, Rect::new(0, 0, self.term_size().0, self.term_size().1))
     }
@@ -1891,6 +1946,10 @@ impl App {
                 Confirm::Approve(..) => {}
                 Confirm::Close(i) => self.close(i),
                 Confirm::Quit => self.quit = true,
+                Confirm::QuitStop => {
+                    self.stop_on_quit = true;
+                    self.quit = true;
+                }
                 Confirm::Push(i) => self.git_push_run(i),
                 Confirm::Merge(i) => self.git_merge_run(i),
                 Confirm::RemoveWorktree(i) => self.git_remove_run(i),
@@ -2091,6 +2150,22 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) if mods.contains(KeyModifiers::CONTROL) => {
                 self.context_menu(x, y)
             }
+            // граница списка и окна агента: тянем мышью (как в Herdr)
+            MouseEventKind::Down(MouseButton::Left) if self.on_divider(x, y) => {
+                self.mode = Mode::Normal;
+                self.divider_drag = true;
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.divider_drag => {
+                let total = self.geo.sidebar.width + self.geo.main.width;
+                let max = total.saturating_sub(40).max(20);
+                self.cfg.sidebar_width = (x + 1).clamp(20, max);
+                self.dirty = true;
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.divider_drag => {
+                self.divider_drag = false;
+                self.cfg.save_state();
+                self.dirty = true;
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 self.mode = Mode::Normal;
                 if in_rect(&self.geo.new_btn, x, y) {
@@ -2285,6 +2360,12 @@ impl App {
             f.worktree = !f.worktree;
         }
         self.mode = Mode::New(f);
+    }
+
+    /// Курсор на границе между списком агентов и окном агента.
+    fn on_divider(&self, x: u16, y: u16) -> bool {
+        let sb = self.geo.sidebar;
+        sb.width > 0 && x + 1 == sb.right() && y >= sb.y && y < sb.bottom()
     }
 
     fn context_menu(&mut self, x: u16, y: u16) {

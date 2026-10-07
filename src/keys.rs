@@ -53,6 +53,8 @@ pub enum Action {
     Palette,
     Help,
     Quit,
+    /// Остановить всех агентов и выйти.
+    QuitStop,
 }
 
 impl Action {
@@ -95,6 +97,7 @@ impl Action {
             "palette" => Action::Palette,
             "help" => Action::Help,
             "quit" => Action::Quit,
+            "quit_stop" => Action::QuitStop,
             _ => return None,
         })
     }
@@ -251,6 +254,7 @@ pub fn nav_action(k: &KeyEvent) -> Option<(Action, bool)> {
         KeyCode::Char('p') | KeyCode::Char(' ') | KeyCode::Char('/') => (Palette, false),
         KeyCode::Char('?') => (Help, false),
         KeyCode::Char('q') => (Quit, false),
+        KeyCode::Char('Q') => (QuitStop, false),
         _ => return None,
     })
 }
