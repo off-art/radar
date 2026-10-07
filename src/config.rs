@@ -24,6 +24,27 @@ pub struct AgentDef {
     pub args: Vec<String>,
     pub kind: Kind,
     pub color: Color,
+    /// Что отправить агенту, чтобы разрешить его запрос (пусто — подтверждение из списка выключено).
+    pub approve: Vec<u8>,
+}
+
+/// Ответ «разрешить» по умолчанию: включён для Claude Code и Qwen Code (Enter на пункте «Yes», проверено),
+/// остальным агентам включается в config.toml (`approve = "y"`).
+fn default_approve(command: &str) -> Vec<u8> {
+    let base = command.rsplit('/').next().unwrap_or(command);
+    match base {
+        "claude" | "qwen" => b"\r".to_vec(),
+        _ => vec![],
+    }
+}
+
+/// `approve = "enter"` / `"y"` / `"1"` / `""` (выключить) из конфига.
+fn parse_approve(s: &str) -> Vec<u8> {
+    match s.trim() {
+        "" | "off" | "none" => vec![],
+        "enter" | "\\r" => b"\r".to_vec(),
+        other => other.as_bytes().to_vec(),
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -34,6 +55,7 @@ struct RawAgent {
     args: Vec<String>,
     kind: Option<String>,
     color: Option<String>,
+    approve: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -55,6 +77,7 @@ struct RawConfig {
     sound: Option<bool>,
     popups: Option<bool>,
     restore: Option<bool>,
+    mouse_select: Option<bool>,
     sound_theme: Option<String>,
     volume: Option<f32>,
     sound_done: Option<String>,
@@ -75,6 +98,8 @@ pub struct Config {
     pub popups: bool,
     /// Восстанавливать список агентов при запуске.
     pub restore: bool,
+    /// Выделение текста мышью в окне агента (протянуть — скопировать).
+    pub mouse_select: bool,
     /// Звуковая тема: bell, sonar, retro, harp, knock, thump, drop.
     pub sound_theme: String,
     /// Громкость уведомлений, 0.0–1.0.
@@ -115,6 +140,7 @@ struct RawState {
     sound: Option<bool>,
     popups: Option<bool>,
     restore: Option<bool>,
+    mouse_select: Option<bool>,
     sound_theme: Option<String>,
     theme: Option<String>,
     volume: Option<f32>,
@@ -147,6 +173,7 @@ fn builtin() -> Vec<AgentDef> {
         args: vec![],
         kind,
         color: Color::Rgb(r, g, b),
+        approve: default_approve(cmd),
     };
     vec![
         mk("Claude Code", "claude", Kind::Claude, (217, 119, 87)),
@@ -166,6 +193,7 @@ impl Config {
             sound: true,
             popups: true,
             restore: true,
+            mouse_select: true,
             sound_theme: crate::notify::DEFAULT_THEME.to_string(),
             volume: 0.6,
             sound_done: None,
@@ -194,6 +222,7 @@ impl Config {
         cfg.sound = raw.sound.unwrap_or(true);
         cfg.popups = raw.popups.unwrap_or(true);
         cfg.restore = raw.restore.unwrap_or(true);
+        cfg.mouse_select = raw.mouse_select.unwrap_or(true);
         if let Some(t) = raw.sound_theme {
             cfg.sound_theme = t;
         }
@@ -243,6 +272,10 @@ impl Config {
                     .as_deref()
                     .and_then(parse_color)
                     .unwrap_or(Color::Rgb(148, 163, 184)),
+                approve: match a.approve.as_deref() {
+                    Some(s) => parse_approve(s),
+                    None => default_approve(&a.command),
+                },
                 name: a.name,
                 command: a.command,
                 args: a.args,
@@ -278,6 +311,9 @@ impl Config {
         if let Some(v) = st.restore {
             self.restore = v;
         }
+        if let Some(v) = st.mouse_select {
+            self.mouse_select = v;
+        }
         if let Some(v) = st.sound_theme {
             self.sound_theme = v;
         }
@@ -294,11 +330,12 @@ impl Config {
 
     pub fn save_state(&self) {
         let text = format!(
-            "# Настройки, изменённые из интерфейса Radar (важнее config.toml)\nnotifications = {}\nsound = {}\npopups = {}\nrestore = {}\nsound_theme = \"{}\"\ntheme = \"{}\"\nvolume = {:.2}\nsidebar_width = {}\n",
+            "# Настройки, изменённые из интерфейса Radar (важнее config.toml)\nnotifications = {}\nsound = {}\npopups = {}\nrestore = {}\nmouse_select = {}\nsound_theme = \"{}\"\ntheme = \"{}\"\nvolume = {:.2}\nsidebar_width = {}\n",
             self.notifications,
             self.sound,
             self.popups,
             self.restore,
+            self.mouse_select,
             self.sound_theme.replace(['"', '\\'], ""),
             self.theme_name.replace(['"', '\\'], ""),
             self.volume,
@@ -336,6 +373,8 @@ sound = true
 popups = true
 # Восстанавливать список агентов при следующем запуске Radar
 restore = true
+# Выделение текста мышью в окне агента (протянуть — скопировать). false — мышь целиком уходит агенту
+mouse_select = true
 # Звуковая тема: bell, sonar, retro, harp, knock, thump, drop (выбор также в палитре: Ctrl+b, p, «Звук»)
 sound_theme = "bell"
 # Громкость уведомлений (0.0–1.0). Свои звуки: sound_done / sound_waiting = "~/sounds/x.wav"
@@ -384,6 +423,7 @@ nav_timeout = 0            # секунд до автовыхода из реж�
 # args = ["--model", "opus"]
 # kind = "claude"
 # color = "#d97757"
+# approve = "enter"   # что отправить агенту при «Разрешить» из списка (Ctrl+b y): "enter", "y", "1" или "" — выключить
 #
 # [[agent]]
 # name = "Aider"
@@ -435,5 +475,22 @@ mod tests {
     #[test]
     fn example_config_is_valid_toml() {
         assert!(toml::from_str::<RawConfig>(EXAMPLE).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod approve_tests {
+    use super::*;
+
+    #[test]
+    fn approve_defaults_and_parsing() {
+        assert_eq!(default_approve("claude"), b"\r");
+        assert_eq!(default_approve("/usr/local/bin/claude"), b"\r");
+        assert_eq!(default_approve("qwen"), b"\r");
+        assert!(default_approve("codex").is_empty());
+        assert_eq!(parse_approve("enter"), b"\r");
+        assert_eq!(parse_approve("y"), b"y");
+        assert!(parse_approve("").is_empty());
+        assert!(parse_approve("off").is_empty());
     }
 }

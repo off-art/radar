@@ -57,6 +57,7 @@ pub fn start_server(path: &PathBuf, tx: Sender<Msg>) -> Result<()> {
 pub fn run_client(event: &str) {
     let mut input = String::new();
     let _ = std::io::stdin().take(1 << 20).read_to_string(&mut input);
+    log_event(event, &input);
     let (Ok(sock), Ok(sess)) = (
         std::env::var("RADAR_SOCK"),
         std::env::var("RADAR_SESSION"),
@@ -71,6 +72,24 @@ pub fn run_client(event: &str) {
     });
     if let Ok(mut s) = UnixStream::connect(sock) {
         let _ = s.write_all(msg.to_string().as_bytes());
+    }
+}
+
+/// Отладка интеграций: `RADAR_HOOK_LOG=1 radar` пишет все события хуков в `~/.config/radar/hooks.log`.
+fn log_event(event: &str, input: &str) {
+    if std::env::var_os("RADAR_HOOK_LOG").is_none() {
+        return;
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let session = std::env::var("RADAR_SESSION").unwrap_or_else(|_| "-".into());
+    let body: String = input.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
+    let line = format!("{secs} session={session} event={event} payload={body}\n");
+    let _ = std::fs::create_dir_all(config_dir());
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(config_dir().join("hooks.log")) {
+        let _ = f.write_all(line.as_bytes());
     }
 }
 

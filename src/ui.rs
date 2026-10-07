@@ -49,11 +49,7 @@ fn icon(s: &Session, ms: u128) -> &'static str {
 }
 
 fn fmt_dur(secs: u64) -> String {
-    if secs >= 3600 {
-        format!("{}:{:02}:{:02}", secs / 3600, (secs / 60) % 60, secs % 60)
-    } else {
-        format!("{}:{:02}", secs / 60, secs % 60)
-    }
+    crate::events::fmt_dur(secs)
 }
 
 fn status_time(s: &Session) -> String {
@@ -123,6 +119,9 @@ pub fn draw(f: &mut Frame, app: &App) {
         Mode::Palette(p) => draw_palette(f, p, &app.theme),
         Mode::Settings(sel) => draw_settings(f, app, *sel),
         Mode::Integrations(sel) => draw_integrations(f, app, *sel),
+        Mode::Diff(v) => draw_diff(f, app, v),
+        Mode::Log(sel) => draw_log(f, app, *sel),
+        Mode::Commit(t) => draw_input_popup(f, "Сообщение коммита", t, &app.theme),
         _ => {}
     }
 }
@@ -234,14 +233,32 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
         push_fit(&mut l2, s.status.label(), bg.fg(col), &mut left);
         let sub = if s.status == Status::Waiting && !s.note.is_empty() {
             s.note.clone()
-        } else if s.subtitle.is_empty() {
-            short_path(&s.cwd)
         } else {
             s.subtitle.clone()
         };
-        push_fit(&mut l2, " · ", bg.fg(th.dim), &mut left);
-        push_fit(&mut l2, &sub.replace('\n', " "), bg.fg(th.dim), &mut left);
+        if !sub.is_empty() {
+            push_fit(&mut l2, " · ", bg.fg(th.dim), &mut left);
+            push_fit(&mut l2, &sub.replace('\n', " "), bg.fg(th.dim), &mut left);
+        }
         buf.set_line(rect.x, rect.y + 1, &Line::from(l2), w as u16);
+
+        // строка 3: git (ветка, изменения) или путь к папке
+        if rect.height >= 3 {
+            let mut left = w.saturating_sub(4);
+            let mut l3: Vec<Span> = vec![Span::styled("   ", bg)];
+            if app.can_approve(idx) {
+                push_fit(&mut l3, "y — разрешить", bg.fg(th.accent).add_modifier(Modifier::BOLD), &mut left);
+                push_fit(&mut l3, "  ", bg, &mut left);
+            }
+            match &s.git {
+                Some(g) => {
+                    let color = if g.dirty() { th.peach } else { th.dim };
+                    push_fit(&mut l3, &g.summary(), bg.fg(color), &mut left);
+                }
+                None => push_fit(&mut l3, &short_path(&s.cwd), bg.fg(th.dim), &mut left),
+            }
+            buf.set_line(rect.x, rect.y + 2, &Line::from(l3), w as u16);
+        }
     }
 
     if app.sessions.is_empty() {
@@ -271,7 +288,12 @@ fn conv(c: vt100::Color, th: &Theme, fg: bool) -> Color {
     }
 }
 
-fn render_screen(buf: &mut Buffer, area: Rect, s: &Session, th: &Theme) {
+/// Невидимые символы, которые ломают сетку ячеек в терминале (ZWSP, word joiner, BOM).
+fn is_zero_width(c: char) -> bool {
+    matches!(c, '\u{200B}' | '\u{2060}' | '\u{FEFF}')
+}
+
+fn render_screen(buf: &mut Buffer, area: Rect, s: &Session, th: &Theme, sel: Option<((u16, u16), (u16, u16))>) {
     let mut p = s.parser.lock().unwrap();
     p.screen_mut().set_scrollback(s.scroll);
     {
@@ -287,7 +309,14 @@ fn render_screen(buf: &mut Buffer, area: Rect, s: &Session, th: &Theme) {
                     continue;
                 };
                 let text = cell.contents();
-                out.set_symbol(if text.is_empty() { " " } else { text });
+                // агенты (Ink) рисуют курсор как «пробел + U+200B»: в ряде терминалов это квадратик
+                // и сдвиг ячеек, поэтому символы нулевой ширины отбрасываем
+                if text.contains(is_zero_width) {
+                    let clean: String = text.chars().filter(|c| !is_zero_width(*c)).collect();
+                    out.set_symbol(if clean.is_empty() { " " } else { &clean });
+                } else {
+                    out.set_symbol(if text.is_empty() { " " } else { text });
+                }
                 let mut st = Style::default().fg(conv(cell.fgcolor(), th, true)).bg(conv(cell.bgcolor(), th, false));
                 if cell.bold() {
                     st = st.add_modifier(Modifier::BOLD);
@@ -300,6 +329,11 @@ fn render_screen(buf: &mut Buffer, area: Rect, s: &Session, th: &Theme) {
                 }
                 if cell.inverse() {
                     st = st.add_modifier(Modifier::REVERSED);
+                }
+                if let Some((a, b)) = sel {
+                    if (r, c) >= a && (r, c) <= b {
+                        st = Style::default().fg(th.on_color).bg(th.accent);
+                    }
                 }
                 out.set_style(st);
             }
@@ -334,7 +368,8 @@ fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         f.render_widget(block, pane.outer);
     }
 
-    render_screen(f.buffer_mut(), pane.inner, s, th);
+    let sel = app.sel.filter(|x| x.idx == pane.idx).map(|x| x.ordered());
+    render_screen(f.buffer_mut(), pane.inner, s, th, sel);
 
     if s.status == Status::Exited && pane.inner.height > 1 {
         let y = pane.inner.bottom() - 1;
@@ -398,6 +433,10 @@ fn draw_header(buf: &mut Buffer, area: Rect, s: &Session, ms: u128, th: &Theme) 
     push_fit(&mut spans, &s.agent, base.fg(s.color), &mut left);
     push_fit(&mut spans, "  ", base, &mut left);
     push_fit(&mut spans, &short_path(&s.cwd), base.fg(th.dim), &mut left);
+    if let Some(g) = &s.git {
+        push_fit(&mut spans, "  ", base, &mut left);
+        push_fit(&mut spans, &g.summary(), base.fg(if g.dirty() { th.peach } else { th.dim }), &mut left);
+    }
     if s.worktree.is_some() {
         push_fit(&mut spans, "  ⎇ worktree", base.fg(th.mauve), &mut left);
     }
@@ -508,10 +547,17 @@ fn draw_statusbar(f: &mut Frame, app: &App) {
         key_hint(&mut spans, "?", "помощь", th);
     }
     let right = app.notif_label();
-    let used: usize = spans.iter().map(|s| s.content.width()).sum();
+    let badge = match app.events.unseen() {
+        0 => String::new(),
+        n => format!(" лента: {n} "),
+    };
+    let used: usize = spans.iter().map(|s| s.content.width()).sum::<usize>() + badge.width();
     if app.geo.notif_btn.width > 0 && r.width as usize > used + right.width() + 1 {
         let pad = r.width as usize - used - right.width();
         spans.push(Span::raw(" ".repeat(pad)));
+        if !badge.is_empty() {
+            spans.push(Span::styled(badge.clone(), Style::default().fg(th.on_color).bg(amber)));
+        }
         let st = if app.notifications {
             Style::default().fg(th.subtext)
         } else {
@@ -681,12 +727,44 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
         name_line.extend(field_spans(&form.name, form.field == 2));
     }
     let mut dir_line = vec![label("Папка", form.field == 1)];
-    dir_line.extend(field_spans(&form.dir, form.field == 1));
+    let ghost = (form.field == 1 && form.dir.cursor() == dir_text.chars().count())
+        .then(|| crate::complete::suggest(&dir_text))
+        .flatten();
+    match ghost {
+        Some(s) if s.to_lowercase().starts_with(&dir_text.to_lowercase()) => {
+            // серый «хвост» продолжает ввод; курсор стоит на его первом символе
+            let tail: Vec<char> = s.chars().skip(dir_text.chars().count()).collect();
+            let dim = Style::default().fg(th.dim);
+            dir_line.push(Span::raw(dir_text.clone()));
+            dir_line.push(Span::styled(tail[0].to_string(), dim.add_modifier(Modifier::REVERSED)));
+            dir_line.push(Span::styled(format!("{}  (→)", tail[1..].iter().collect::<String>()), dim));
+        }
+        Some(s) => {
+            dir_line.extend(field_spans(&form.dir, true));
+            dir_line.push(Span::styled(format!("  → {s}  (→)"), Style::default().fg(th.dim)));
+        }
+        None => dir_line.extend(field_spans(&form.dir, form.field == 1)),
+    }
 
+    let hint_line = if form.field == 1 && !form.hints.is_empty() {
+        let w = inner.width.saturating_sub(FORM_LABEL + 2) as usize;
+        let mut s = String::new();
+        for h in &form.hints {
+            let piece = format!("{h}/  ");
+            if s.width() + piece.width() > w.saturating_sub(2) {
+                s.push('…');
+                break;
+            }
+            s.push_str(&piece);
+        }
+        Line::from(vec![Span::raw(" ".repeat(FORM_LABEL as usize)), Span::styled(s, Style::default().fg(th.dim))])
+    } else {
+        Line::from("")
+    };
     lines.extend([
         Line::from(""),
         Line::from(dir_line),
-        Line::from(""),
+        hint_line,
         Line::from(name_line),
         Line::from(""),
         Line::from(vec![
@@ -702,7 +780,7 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Enter — запустить · клик или Tab — поле · ←/→ — агент · Esc — отмена",
+            "Enter — запустить · ↑/↓ — поле · Tab в «Папка» — дополнить · Esc",
             Style::default().fg(th.dim),
         )),
     ]);
@@ -810,12 +888,93 @@ fn draw_palette(f: &mut Frame, p: &Palette, th: &Theme) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Диалог разрешения: что просит агент и вопрос с вариантами — как на его экране.
+fn draw_approve(f: &mut Frame, app: &App, i: usize, note: &str, sel: Option<usize>) {
+    let th = &app.theme;
+    let Some(s) = app.sessions.get(i) else { return };
+    let excerpt = s.prompt_excerpt();
+    let area = f.area();
+    let w = area.width.saturating_sub(4).min(78).max(30);
+    let text_w = w.saturating_sub(4) as usize;
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(format!("{} · {} просит разрешение:", s.agent, s.name), Style::default().fg(th.subtext))),
+        Line::from(Span::styled(fit(note, text_w), Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(""),
+    ];
+    let max_rows = (area.height as usize).saturating_sub(9).clamp(3, 16);
+    let skip = excerpt.len().saturating_sub(max_rows);
+    let (opt_idx, _) = crate::session::option_lines(&excerpt);
+    for (k, l) in excerpt.iter().enumerate().skip(skip) {
+        let opt = opt_idx.iter().position(|&x| x == k);
+        let line = match opt {
+            // варианты рисуем сами: выбор в диалоге и выбор агента могут отличаться
+            Some(o) => {
+                let text = l.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
+                let chosen = sel == Some(o);
+                let st = if chosen {
+                    Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(th.dim)
+                };
+                Line::from(Span::styled(fit(&format!("{} {text}", if chosen { "›" } else { " " }), text_w), st))
+            }
+            None => Line::from(Span::styled(fit(l, text_w), Style::default().fg(th.dim))),
+        };
+        lines.push(line);
+    }
+    lines.push(Line::from(""));
+    let foot = if opt_idx.is_empty() {
+        "y — разрешить · любая другая клавиша — отмена"
+    } else {
+        "↑/↓ или цифра — выбор · Enter / y — подтвердить · Esc — отмена"
+    };
+    lines.push(Line::from(Span::styled(foot, Style::default().fg(th.subtext))));
+    let r = centered(area, w, lines.len() as u16 + 2);
+    clear(f, r, th);
+    let block = popup_block(th, "Подтверждение");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
+    if let Confirm::Approve(i, note, sel) = c {
+        return draw_approve(f, app, *i, note, *sel);
+    }
     let th = &app.theme;
     let text = match c {
         Confirm::Close(i) => {
             let name = app.sessions.get(*i).map(|s| s.name.clone()).unwrap_or_default();
             format!("Закрыть агента «{name}» и остановить его процесс?")
+        }
+        Confirm::Push(i) => {
+            let b = app.sessions.get(*i).and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
+            format!("Отправить ветку «{b}» на сервер (git push)?")
+        }
+        Confirm::Merge(i) => {
+            let s = app.sessions.get(*i);
+            let b = s.and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
+            let dirty = s.and_then(|s| s.git.as_ref()).map(|g| g.dirty()).unwrap_or(false);
+            let mut t = format!("Влить «{b}» в текущую ветку основного репозитория (merge --no-ff)?");
+            if dirty {
+                t.push_str("\nВнимание: незакоммиченные изменения в слияние не войдут.");
+            }
+            t
+        }
+        Confirm::RemoveWorktree(i) => {
+            let s = app.sessions.get(*i);
+            let name = s.map(|s| s.name.clone()).unwrap_or_default();
+            let dirty = s.and_then(|s| s.git.as_ref()).map(|g| g.dirty()).unwrap_or(false);
+            let mut t = format!("Закрыть агента «{name}» и удалить его worktree (ветка — только если влита)?");
+            if dirty {
+                t.push_str("\nВнимание: незакоммиченные изменения пропадут.");
+            }
+            t
+        }
+        Confirm::Approve(i, note, _) => {
+            let s = app.sessions.get(*i);
+            let who = s.map(|s| format!("{} · {}", s.agent, s.name)).unwrap_or_default();
+            format!("{who} просит разрешение:\n\n{note}\n\nРазрешить один раз?")
         }
         Confirm::Quit => {
             let n = app.sessions.iter().filter(|s| s.is_running()).count();
@@ -826,19 +985,22 @@ fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
             }
         }
     };
-    let r = centered(f.area(), (text.width() as u16 + 6).max(40), 5);
+    let body: Vec<&str> = text.lines().collect();
+    let wmax = body.iter().map(|l| l.width()).max().unwrap_or(0).max(48) as u16; // не уже подвала с подсказкой клавиш
+    let r = centered(f.area(), wmax + 6, body.len() as u16 + 4);
     clear(f, r, th);
     let block = popup_block(th, "Подтверждение");
     let inner = block.inner(r);
     f.render_widget(block, r);
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::from(text),
-            Line::from(""),
-            Line::from(Span::styled("y / Enter — да · любая другая клавиша — отмена", Style::default().fg(th.dim))),
-        ]),
-        inner,
-    );
+    let mut lines: Vec<Line> = body.iter().map(|l| Line::from(l.to_string())).collect();
+    lines.push(Line::from(""));
+    let foot = if matches!(c, Confirm::Approve(..)) {
+        "y — разрешить · любая другая клавиша — отмена"
+    } else {
+        "y / Enter — да · любая другая клавиша — отмена"
+    };
+    lines.push(Line::from(Span::styled(foot, Style::default().fg(th.dim))));
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_help(f: &mut Frame, app: &App) {
@@ -858,6 +1020,9 @@ fn draw_help(f: &mut Frame, app: &App) {
         ("  g".into(), "сетка ⇄ один агент"),
         ("  m / M".into(), "тишина для агента / все уведомления"),
         ("  S".into(), "выбрать звук уведомлений (7 тем, с прослушиванием)"),
+        ("  v".into(), "изменения агента (git diff): файлы слева, строки справа"),
+        ("  y".into(), "разрешить запрос агента, который ждёт ответа (с диалогом и текстом запроса)"),
+        ("  l".into(), "лента событий: готов, ждёт ответа, завершён; Enter — к агенту"),
         ("  ,".into(), "настройки: цветовая схема, звук, ширина списка"),
         ("  u / d, PgUp / PgDn".into(), "прокрутка истории агента"),
         ("  p или Space".into(), "палитра команд (поиск по действиям и агентам)"),
@@ -959,6 +1124,68 @@ pub fn integrations_layout(area: Rect, rows: usize) -> (Rect, Vec<Rect>) {
     (popup, rects)
 }
 
+// ───────────── лента событий ─────────────
+
+pub fn log_layout(area: Rect, total: usize, sel: usize) -> (Rect, Vec<Rect>, usize) {
+    let h = (total as u16).clamp(3, 20) + 4;
+    let popup = centered(area, 90, h);
+    let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let visible = inner.height.saturating_sub(2) as usize;
+    let shown = visible.min(total);
+    let first = if sel >= visible { sel + 1 - visible } else { 0 };
+    let rows = (0..shown).map(|i| Rect::new(inner.x, inner.y + i as u16, inner.width, 1)).collect();
+    (popup, rows, first)
+}
+
+fn draw_log(f: &mut Frame, app: &App, sel: usize) {
+    use crate::events::Kind;
+    let th = &app.theme;
+    let total = app.events.items.len();
+    let (popup, rows, first) = log_layout(f.area(), total, sel);
+    clear(f, popup, th);
+    f.render_widget(popup_block(th, "Лента событий"), popup);
+    if total == 0 {
+        f.render_widget(
+            Paragraph::new(Span::styled("Пока пусто: события появятся, когда агенты что-то сделают", Style::default().fg(th.dim))),
+            Rect::new(popup.x + 3, popup.y + 2, popup.width.saturating_sub(4), 1),
+        );
+    }
+    for (i, r) in rows.iter().enumerate() {
+        let idx = first + i;
+        let Some(e) = app.events.items.iter().rev().nth(idx) else { break };
+        let active = idx == sel;
+        let base = if active { Style::default().bg(th.active_row_bg) } else { Style::default() };
+        let color = match e.kind {
+            Kind::Done => th.green,
+            Kind::Waiting => th.accent,
+            Kind::Exited => th.red,
+            Kind::Started => th.blue,
+            Kind::Git => th.mauve,
+            Kind::Approved => th.teal,
+        };
+        let w = r.width.saturating_sub(15) as usize;
+        let mut text = e.text.replace('\n', " ");
+        if !e.agent.is_empty() {
+            text = format!("{} · {}", e.agent, text);
+        }
+        while text.width() > w {
+            text.pop();
+        }
+        let line = Line::from(vec![
+            Span::styled(if active { " ▸ " } else { "   " }, base.fg(th.accent)),
+            Span::styled(format!("{}  ", e.time), base.fg(th.dim)),
+            Span::styled(format!("{} ", e.kind.icon()), base.fg(color)),
+            Span::styled(text, base.fg(th.text)),
+        ]);
+        f.render_widget(Paragraph::new(line).style(base), *r);
+    }
+    let hint = Rect::new(popup.x + 3, popup.bottom().saturating_sub(2), popup.width.saturating_sub(4), 1);
+    f.render_widget(
+        Paragraph::new(Span::styled("↑/↓ — выбор · Enter или клик — к агенту · Esc — закрыть", Style::default().fg(th.dim))),
+        hint,
+    );
+}
+
 fn draw_integrations(f: &mut Frame, app: &App, sel: usize) {
     use crate::integrations::State;
     let th = &app.theme;
@@ -1012,4 +1239,144 @@ fn draw_integrations(f: &mut Frame, app: &App, sel: usize) {
         ]),
         hint,
     );
+}
+
+// ───────────── просмотр изменений ─────────────
+
+/// Окно просмотра: (всё окно, список файлов, область строк diff).
+pub fn diff_layout(area: Rect) -> (Rect, Rect, Rect) {
+    let popup = Rect::new(
+        area.x + 2.min(area.width / 4),
+        area.y + 1.min(area.height / 4),
+        area.width.saturating_sub(4).max(20),
+        area.height.saturating_sub(2).max(8),
+    );
+    let popup = Rect::new(popup.x, popup.y, popup.width.min(area.width), popup.height.min(area.height));
+    let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let lw = (inner.width / 4).clamp(16, 36).min(inner.width.saturating_sub(10));
+    let h = inner.height.saturating_sub(2);
+    let list = Rect::new(inner.x, inner.y + 1, lw, h);
+    let body = Rect::new(inner.x + lw + 1, inner.y + 1, inner.width.saturating_sub(lw + 1), h);
+    (popup, list, body)
+}
+
+/// Индекс первого видимого файла в списке (выбранный всегда на экране).
+pub fn diff_list_first(v: &crate::diff::View, rows: usize) -> usize {
+    if rows == 0 || v.sel < rows {
+        0
+    } else {
+        v.sel + 1 - rows
+    }
+}
+
+/// Оставляет конец строки (имя файла важнее начала пути).
+fn fit_tail(s: &str, w: usize) -> String {
+    if s.width() <= w {
+        return s.to_string();
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut used = 1; // под «…»
+    for c in chars.iter().rev() {
+        let cw = c.width().unwrap_or(0);
+        if used + cw > w {
+            break;
+        }
+        out.insert(0, *c);
+        used += cw;
+    }
+    format!("…{out}")
+}
+
+fn draw_diff(f: &mut Frame, app: &App, v: &crate::diff::View) {
+    use crate::diff::Kind;
+    let th = &app.theme;
+    let (popup, list, body) = diff_layout(f.area());
+    clear(f, popup, th);
+    f.render_widget(popup_block(th, &format!("Изменения — {}", v.title)), popup);
+    let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+
+    let (ta, tr) = v.total();
+    let head = Line::from(vec![
+        Span::styled(format!(" {} файл(ов) ", v.files.len()), Style::default().fg(th.dim)),
+        Span::styled(format!("+{ta} "), Style::default().fg(th.green)),
+        Span::styled(format!("−{tr}"), Style::default().fg(th.red)),
+    ]);
+    f.render_widget(Paragraph::new(head), Rect::new(inner.x, inner.y, inner.width, 1));
+
+    let buf = f.buffer_mut();
+    // разделитель между списком и diff
+    for y in list.y..list.bottom() {
+        if let Some(c) = buf.cell_mut((list.right(), y)) {
+            c.set_symbol("│").set_style(Style::default().fg(th.line));
+        }
+    }
+    let first = diff_list_first(v, list.height as usize);
+    for (row, (i, file)) in v.files.iter().enumerate().skip(first).take(list.height as usize).enumerate() {
+        let r = Rect::new(list.x, list.y + row as u16, list.width, 1);
+        let active = i == v.sel;
+        let base = if active { Style::default().bg(th.active_row_bg) } else { Style::default() };
+        if active {
+            buf.set_style(r, base);
+        }
+        let sc = match file.status {
+            'A' | '?' => th.green,
+            'D' => th.red,
+            'R' => th.blue,
+            _ => th.peach,
+        };
+        let stat = format!(" +{} −{}", file.added, file.removed);
+        let name_w = (r.width as usize).saturating_sub(3 + stat.width());
+        let line = Line::from(vec![
+            Span::styled(format!(" {} ", file.status), base.fg(sc).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:<w$}", fit_tail(&file.path, name_w), w = name_w),
+                base.add_modifier(if active { Modifier::BOLD } else { Modifier::empty() }),
+            ),
+            Span::styled(stat, base.fg(th.dim)),
+        ]);
+        buf.set_line(r.x, r.y, &line, r.width);
+    }
+
+    // строки выбранного файла
+    if let Some(file) = v.file() {
+        let h = body.height as usize;
+        let w = body.width as usize;
+        for (row, l) in file.lines.iter().skip(v.scroll).take(h).enumerate() {
+            let (prefix, style) = match l.kind {
+                Kind::Add => ("+", Style::default().fg(th.green)),
+                Kind::Del => ("-", Style::default().fg(th.red)),
+                Kind::Hunk => ("", Style::default().fg(th.blue).add_modifier(Modifier::BOLD)),
+                Kind::Meta => ("", Style::default().fg(th.dim).add_modifier(Modifier::ITALIC)),
+                Kind::Ctx => (" ", Style::default().fg(th.subtext)),
+            };
+            let text = format!("{prefix}{}", l.text.replace('\t', "    "));
+            buf.set_line(body.x, body.y + row as u16, &Line::from(Span::styled(fit(&text, w), style)), body.width);
+        }
+        // позиция в файле справа в шапке
+        let total = file.lines.len();
+        if total > h {
+            let pos = format!(" {}–{} из {} ", v.scroll + 1, (v.scroll + h).min(total), total);
+            let x = inner.right().saturating_sub(pos.width() as u16);
+            buf.set_line(x, inner.y, &Line::from(Span::styled(pos, Style::default().fg(th.dim))), inner.width);
+        }
+    }
+
+    let hint = Line::from(Span::styled(
+        "j/k, колесо — строки · n/p, клик — файл · PgUp/PgDn · c — коммит · P — push · r — обновить · Esc — закрыть",
+        Style::default().fg(th.dim),
+    ));
+    buf.set_line(inner.x + 1, inner.bottom().saturating_sub(1), &hint, inner.width.saturating_sub(2));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_width_detected() {
+        assert!(is_zero_width('\u{200B}'));
+        assert!(!is_zero_width(' '));
+        assert!(!is_zero_width('\u{200D}')); // ZWJ нужен для составных эмодзи
+    }
 }

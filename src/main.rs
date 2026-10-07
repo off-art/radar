@@ -1,5 +1,11 @@
 mod app;
+mod clipboard;
+mod complete;
 mod config;
+mod diff;
+mod events;
+mod git;
+mod gitops;
 mod hook;
 mod input;
 mod integrations;

@@ -33,11 +33,34 @@ pub struct NewForm {
     pub worktree: bool,
     pub field: usize,
     pub error: Option<String>,
+    /// Подходящие папки после Tab (подсказка под полем «Папка»).
+    pub hints: Vec<String>,
+}
+
+/// Выделение текста мышью в окне агента (координаты — ячейки экрана агента).
+#[derive(Clone, Copy, Debug)]
+pub struct Selection {
+    pub idx: usize,
+    pub anchor: (u16, u16),
+    pub head: (u16, u16),
+}
+
+impl Selection {
+    /// (начало, конец) в порядке чтения.
+    pub fn ordered(&self) -> ((u16, u16), (u16, u16)) {
+        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+    }
 }
 
 pub enum Confirm {
     Close(usize),
     Quit,
+    Push(usize),
+    Merge(usize),
+    RemoveWorktree(usize),
+    /// Разрешить запрос агента: (номер агента, текст запроса на момент диалога).
+    /// Третье поле — выбранный в диалоге вариант ответа (по порядку), если на экране агента есть список.
+    Approve(usize, String, Option<usize>),
 }
 
 pub struct Palette {
@@ -67,6 +90,12 @@ pub enum Mode {
     Settings(usize),
     /// Интеграции с агентами; число — выбранная строка.
     Integrations(usize),
+    /// Просмотр изменений (git diff) агента.
+    Diff(Box<crate::diff::View>),
+    /// Лента событий; число — выбранная строка (0 — самое новое).
+    Log(usize),
+    /// Сообщение коммита для выбранного агента.
+    Commit(TextField),
 }
 
 pub struct IntegrationRow {
@@ -112,6 +141,12 @@ pub struct App {
     pub quit: bool,
     /// Последний записанный список агентов (чтобы не писать файл зря).
     persisted: String,
+    pub events: crate::events::Log,
+    /// Текущее выделение текста в окне агента.
+    pub sel: Option<Selection>,
+    /// Нажатая левая кнопка в окне агента: ждём, будет ли это клик (уйдёт агенту) или выделение.
+    press: Option<(usize, Rect, u16, u16, KeyModifiers)>,
+    git: crate::git::Watcher,
     pub dirty: bool,
     pub started: Instant,
     pub start_dir: PathBuf,
@@ -124,6 +159,14 @@ pub struct App {
     next_id: u32,
     tx: Sender<Msg>,
     ctx: SpawnCtx,
+}
+
+/// Tab в поле «Папка»: дописывает путь до однозначного места; если вариантов несколько —
+/// только показывает их под полем (ничего не выбирает за человека).
+fn form_complete(f: &mut NewForm) {
+    let c = crate::complete::complete(&f.dir.text());
+    f.dir = TextField::new(&c.text);
+    f.hints = c.matches;
 }
 
 pub fn expand_tilde(p: &str) -> PathBuf {
@@ -211,6 +254,10 @@ impl App {
             notifications,
             quit: false,
             persisted: String::new(),
+            events: Default::default(),
+            sel: None,
+            press: None,
+            git: crate::git::Watcher::start(tx.clone()),
             dirty: true,
             started: Instant::now(),
             start_dir,
@@ -356,7 +403,9 @@ impl App {
             &self.ctx,
             resume,
         )?;
+        let (sid, agent_name, sname) = (s.id, s.agent.clone(), s.name.clone());
         self.sessions.push(s);
+        self.events.push(sid, agent_name, crate::events::Kind::Started, format!("{sname}: запущен"));
         self.selected = self.sessions.len() - 1;
         self.dirty = true;
         Ok(())
@@ -535,8 +584,8 @@ impl App {
         let sidebar = Rect::new(body.x, body.y, sw, body.height);
         let main = Rect::new(body.x + sw, body.y, body.width - sw, body.height);
 
-        // элементы списка: 3 строки на агента, 3 строки шапка
-        let cap = (body.height.saturating_sub(3) / 3).max(1) as usize;
+        // элементы списка: 3 строки на агента + пустая, 3 строки шапка
+        let cap = (body.height.saturating_sub(3) / 4).max(1) as usize;
         if self.selected < self.sidebar_first {
             self.sidebar_first = self.selected;
         } else if self.selected >= self.sidebar_first + cap {
@@ -548,7 +597,7 @@ impl App {
         let mut items = vec![];
         if sw > 0 {
             for (row, idx) in (self.sidebar_first..self.sessions.len()).take(cap).enumerate() {
-                items.push((idx, Rect::new(sidebar.x, sidebar.y + 3 + row as u16 * 3, sw - 1, 2)));
+                items.push((idx, Rect::new(sidebar.x, sidebar.y + 3 + row as u16 * 4, sw - 1, 3)));
             }
         }
         let new_btn = if sw > 12 {
@@ -625,6 +674,9 @@ impl App {
 
     fn handle_attention(&mut self, idx: usize, a: Attention) {
         let viewing = self.is_viewing(idx);
+        if a == Attention::Done {
+            self.git.poke(); // агент закончил — быстро обновить git-состояние
+        }
         let Some(s) = self.sessions.get_mut(idx) else {
             return;
         };
@@ -636,6 +688,19 @@ impl App {
             Attention::Done => ("Задача выполнена", "закончил работу", Sound::Done),
         };
         let body = format!("{} · {}", s.agent, s.name);
+        {
+            use crate::events::{fmt_dur, Kind};
+            let (kind, text) = match a {
+                Attention::NeedsInput if s.note.is_empty() => (Kind::Waiting, "ждёт ответа".to_string()),
+                Attention::NeedsInput => (Kind::Waiting, format!("ждёт ответа: {}", s.note)),
+                Attention::Done => match s.last_worked {
+                    Some(d) => (Kind::Done, format!("закончил за {}", fmt_dur(d.as_secs()))),
+                    None => (Kind::Done, "закончил работу".to_string()),
+                },
+            };
+            let (sid, ag, nm) = (s.id, s.agent.clone(), s.name.clone());
+            self.events.push(sid, ag, kind, format!("{nm}: {text}"));
+        }
         let toast = format!("{} {} — {}", s.agent, s.name, verb);
         let muted = s.muted;
         self.toast(toast);
@@ -645,6 +710,9 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        self.git.set_targets(
+            self.sessions.iter().filter(|s| s.is_running()).map(|s| (s.id, s.cwd.clone())).collect(),
+        );
         for i in 0..self.sessions.len() {
             let before = self.sessions[i].status;
             if let Some(a) = self.sessions[i].tick() {
@@ -683,8 +751,33 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Msg::GitDone { label, result } => {
+                let one_line = |s: &str| s.lines().take(2).collect::<Vec<_>>().join(" · ");
+                match result {
+                    Ok(m) => self.toast(format!("{label}: {}", one_line(&m))),
+                    Err(e) => self.toast(format!("{label}: ошибка — {}", one_line(&e))),
+                }
+                if let Some((t, _)) = self.toast.clone() {
+                    self.events.push(0, "", crate::events::Kind::Git, t);
+                }
+                self.git.poke();
+                self.dirty = true;
+            }
+            Msg::Git(id, info) => {
+                if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
+                    if s.git != info {
+                        s.git = info;
+                        self.dirty = true;
+                    }
+                }
+            }
             Msg::Exited(id, code) => {
                 if let Some(i) = self.sessions.iter().position(|s| s.id == id) {
+                    {
+                        let s = &self.sessions[i];
+                        let (sid, ag, nm) = (s.id, s.agent.clone(), s.name.clone());
+                        self.events.push(sid, ag, crate::events::Kind::Exited, format!("{nm}: завершён (код {code})"));
+                    }
                     if let Some(a) = self.sessions[i].mark_exited(code) {
                         self.handle_attention(i, a);
                     }
@@ -730,6 +823,7 @@ impl App {
             worktree: false,
             field: if agent.is_some() { 1 } else { 0 },
             error: None,
+            hints: vec![],
         });
     }
 
@@ -801,6 +895,27 @@ impl App {
             Action::PickSound => self.open_sound_picker(),
             Action::Settings => self.mode = Mode::Settings(0),
             Action::Integrations => self.mode = Mode::Integrations(0),
+            Action::Diff => self.open_diff(),
+            Action::Approve => self.approve_open(),
+            Action::ApproveAt(i) => self.approve_open_at(i),
+            Action::CopySel => {
+                if let Some(sel) = self.sel.take() {
+                    let text = self.selection_text(&sel);
+                    let n = text.chars().count();
+                    if n > 0 {
+                        let ok = crate::clipboard::copy(&text);
+                        self.toast(if ok { format!("Скопировано: {n} симв.") } else { "Не удалось скопировать".to_string() });
+                    }
+                }
+            }
+            Action::Log => {
+                self.events.mark_seen();
+                self.mode = Mode::Log(0);
+            }
+            Action::GitCommit if has => self.git_commit_open(),
+            Action::GitPush if has => self.git_confirm(Action::GitPush),
+            Action::GitMerge if has => self.git_confirm(Action::GitMerge),
+            Action::GitRemoveWorktree if has => self.git_confirm(Action::GitRemoveWorktree),
             Action::Next => self.select_rel(1),
             Action::Prev => self.select_rel(-1),
             Action::Select(i) => self.select(i),
@@ -882,6 +997,24 @@ impl App {
             });
         }
         e.push(PaletteEntry { title: "Настройки: тема оформления, звук, ширина списка".into(), hint: ",".into(), action: Action::Settings });
+        e.push(PaletteEntry { title: "Изменения выбранного агента (git diff)".into(), hint: "v".into(), action: Action::Diff });
+        e.push(PaletteEntry { title: "Лента событий".into(), hint: "l".into(), action: Action::Log });
+        for i in self.approvable() {
+            let s = &self.sessions[i];
+            e.push(PaletteEntry {
+                title: format!("Разрешить: {} · {} — {}", s.name, s.agent, s.note),
+                hint: "y".into(),
+                action: Action::ApproveAt(i),
+            });
+        }
+        if self.sessions.get(self.selected).map(|s| s.git.is_some()).unwrap_or(false) {
+            e.push(PaletteEntry { title: "Git: закоммитить изменения агента".into(), hint: String::new(), action: Action::GitCommit });
+            e.push(PaletteEntry { title: "Git: отправить ветку (push)".into(), hint: String::new(), action: Action::GitPush });
+            if self.sessions[self.selected].worktree.is_some() {
+                e.push(PaletteEntry { title: "Git: влить ветку агента в основную".into(), hint: String::new(), action: Action::GitMerge });
+                e.push(PaletteEntry { title: "Git: удалить worktree агента".into(), hint: String::new(), action: Action::GitRemoveWorktree });
+            }
+        }
         e.push(PaletteEntry { title: "Интеграции агентов: точные статусы через хуки".into(), hint: String::new(), action: Action::Integrations });
         e.push(PaletteEntry { title: "Помощь и горячие клавиши".into(), hint: "?".into(), action: Action::Help });
         e.push(PaletteEntry { title: "Выйти из Radar".into(), hint: "q".into(), action: Action::Quit });
@@ -895,6 +1028,10 @@ impl App {
             items.push(MenuItem::new("Открыть", Action::Select(idx), ""));
             items.push(MenuItem::sep());
         }
+        if self.sel.map_or(false, |sl| sl.idx == idx) {
+            items.push(MenuItem::new("Копировать", Action::CopySel, ""));
+            items.push(MenuItem::sep());
+        }
         items.push(MenuItem::new("Переименовать…", Action::Rename, "r"));
         let mut restart = MenuItem::new("Перезапустить", Action::Restart, "R");
         if s.is_running() {
@@ -906,6 +1043,19 @@ impl App {
             Action::ToggleMute,
             "m",
         ));
+        if s.status == Status::Waiting {
+            items.push(MenuItem::new("Разрешить запрос…", Action::Approve, "y"));
+        }
+        items.push(MenuItem::new("Изменения (git diff)…", Action::Diff, "v"));
+        items.push(MenuItem::new("Лента событий…", Action::Log, "l"));
+        if s.git.is_some() {
+            items.push(MenuItem::new("Закоммитить…", Action::GitCommit, ""));
+            items.push(MenuItem::new("Отправить (push)…", Action::GitPush, ""));
+            if s.worktree.is_some() {
+                items.push(MenuItem::new("Влить ветку в основную…", Action::GitMerge, ""));
+                items.push(MenuItem::new("Удалить worktree…", Action::GitRemoveWorktree, ""));
+            }
+        }
         items.push(MenuItem::sep());
         items.push(MenuItem::new("Новый агент в этой папке…", Action::NewHere, "N"));
         if !from_sidebar {
@@ -920,6 +1070,10 @@ impl App {
         let mut items = vec![];
         for i in self.visible_agents(false) {
             items.push(MenuItem::new(&format!("Новый: {}", self.cfg.agents[i].name), Action::NewAgentOf(i), ""));
+        }
+        for i in self.approvable() {
+            let s = &self.sessions[i];
+            items.push(MenuItem::new(&format!("Разрешить: {} — {}", s.name, s.note), Action::ApproveAt(i), "y"));
         }
         items.extend([
             MenuItem::new("Новый агент…", Action::NewAgent, "n"),
@@ -961,6 +1115,9 @@ impl App {
         match ev {
             Event::Key(k) if k.kind != KeyEventKind::Release => {
                 self.last_key = Instant::now();
+                if !matches!(self.mode, Mode::Menu(_)) {
+                    self.sel = None;
+                }
                 self.on_key(k);
             }
             Event::Paste(text) => {
@@ -1013,6 +1170,9 @@ impl App {
             Mode::Palette(p) => self.key_palette(p, k),
             Mode::Settings(i) => self.key_settings(i, k),
             Mode::Integrations(i) => self.key_integrations(i, k),
+            Mode::Diff(v) => self.key_diff(v, k),
+            Mode::Log(i) => self.key_log(i, k),
+            Mode::Commit(t) => self.key_commit(t, k),
             Mode::Help => {}
         }
     }
@@ -1112,6 +1272,7 @@ impl App {
                 if self.cfg.sidebar_width == 0 { "авто".into() } else { self.cfg.sidebar_width.to_string() },
             ),
             ("Восстанавливать агентов".into(), onoff(self.cfg.restore)),
+            ("Выделение мышью (копирование)".into(), onoff(self.cfg.mouse_select)),
         ]
     }
 
@@ -1148,6 +1309,11 @@ impl App {
                 self.cfg.sidebar_width = cycle(&[0u16, 26, 32, 40, 48], &self.cfg.sidebar_width, dir);
             }
             7 => self.cfg.restore = !self.cfg.restore,
+            8 => {
+                self.cfg.mouse_select = !self.cfg.mouse_select;
+                self.sel = None;
+                self.press = None;
+            }
             _ => {}
         }
         self.cfg.save_state();
@@ -1235,6 +1401,176 @@ impl App {
         self.dirty = true;
     }
 
+    /// Выполняет git-действие в фоне; результат придёт как `Msg::GitDone`.
+    fn spawn_git(&self, label: &str, job: impl FnOnce() -> Result<String, String> + Send + 'static) {
+        let tx = self.tx.clone();
+        let label = label.to_string();
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::GitDone { label, result: job() });
+        });
+    }
+
+    fn git_commit_open(&mut self) {
+        let Some(s) = self.sessions.get(self.selected) else { return };
+        match &s.git {
+            None => self.toast("Папка агента не git-репозиторий"),
+            Some(g) if !g.dirty() => self.toast("Нечего коммитить: изменений нет"),
+            Some(_) => {
+                // подсказка — последний запрос к агенту
+                let hint: String = s.subtitle.lines().next().unwrap_or("").chars().take(72).collect();
+                self.mode = Mode::Commit(TextField::new(hint.trim()));
+            }
+        }
+    }
+
+    fn key_commit(&mut self, mut t: TextField, k: KeyEvent) {
+        match k.code {
+            KeyCode::Esc => {}
+            KeyCode::Enter => {
+                let msg = t.text();
+                if msg.trim().is_empty() {
+                    self.toast("Введите сообщение коммита");
+                    self.mode = Mode::Commit(t);
+                    return;
+                }
+                if let Some(s) = self.sessions.get(self.selected) {
+                    let dir = s.cwd.clone();
+                    self.toast("Коммит…");
+                    self.spawn_git("Коммит", move || crate::gitops::commit(&dir, &msg));
+                }
+            }
+            _ => {
+                t.handle_key(&k);
+                self.mode = Mode::Commit(t);
+            }
+        }
+    }
+
+    /// Подтверждение опасных/внешних git-действий.
+    fn git_confirm(&mut self, a: Action) {
+        let i = self.selected;
+        let Some(s) = self.sessions.get(i) else { return };
+        if s.git.is_none() {
+            self.toast("Папка агента не git-репозиторий");
+            return;
+        }
+        match a {
+            Action::GitPush => self.mode = Mode::Confirm(Confirm::Push(i)),
+            Action::GitMerge | Action::GitRemoveWorktree if s.worktree.is_none() => {
+                self.toast("Это не worktree-агент (worktree включается галочкой при создании агента)");
+            }
+            Action::GitMerge => self.mode = Mode::Confirm(Confirm::Merge(i)),
+            Action::GitRemoveWorktree => self.mode = Mode::Confirm(Confirm::RemoveWorktree(i)),
+            _ => {}
+        }
+    }
+
+    fn git_push_run(&mut self, i: usize) {
+        let Some(s) = self.sessions.get(i) else { return };
+        let dir = s.cwd.clone();
+        self.toast("Отправка…");
+        self.spawn_git("Push", move || crate::gitops::push(&dir));
+    }
+
+    fn git_merge_run(&mut self, i: usize) {
+        let Some(s) = self.sessions.get(i) else { return };
+        let (Some(wt), Some(g)) = (s.worktree.clone(), s.git.clone()) else { return };
+        self.toast("Слияние…");
+        self.spawn_git("Слияние", move || crate::gitops::merge_into_main(&wt, &g.branch));
+    }
+
+    fn git_remove_run(&mut self, i: usize) {
+        let Some(s) = self.sessions.get(i) else { return };
+        let (Some(wt), Some(g)) = (s.worktree.clone(), s.git.clone()) else { return };
+        self.close(i); // агент работает внутри worktree — сначала останавливаем
+        self.toast("Удаление worktree…");
+        self.spawn_git("Worktree", move || crate::gitops::remove_worktree(&wt, &g.branch));
+    }
+
+    fn open_diff(&mut self) {
+        let Some(s) = self.sessions.get(self.selected) else {
+            self.toast("Нет агента, у которого можно посмотреть изменения");
+            return;
+        };
+        let (dir, title) = (s.cwd.clone(), format!("{} · {}", s.name, s.agent));
+        match crate::diff::load(&dir) {
+            Err(e) => self.toast(e),
+            Ok(files) if files.is_empty() => self.toast("Изменений нет — рабочая папка совпадает с последним коммитом"),
+            Ok(files) => {
+                self.mode = Mode::Diff(Box::new(crate::diff::View { title, dir, files, sel: 0, scroll: 0 }));
+            }
+        }
+    }
+
+    fn diff_height(&self) -> usize {
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        ui::diff_layout(area).2.height as usize
+    }
+
+    fn key_diff(&mut self, mut v: Box<crate::diff::View>, k: KeyEvent) {
+        let h = self.diff_height();
+        let page = (h.saturating_sub(2)).max(1) as isize;
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('v') => return,
+            KeyCode::Down | KeyCode::Char('j') => v.scroll_by(1, h),
+            KeyCode::Up | KeyCode::Char('k') => v.scroll_by(-1, h),
+            KeyCode::PageDown | KeyCode::Char(' ') | KeyCode::Char('d') => v.scroll_by(page, h),
+            KeyCode::PageUp | KeyCode::Char('u') => v.scroll_by(-page, h),
+            KeyCode::Home | KeyCode::Char('g') => v.scroll = 0,
+            KeyCode::End | KeyCode::Char('G') => v.scroll = v.max_scroll(h),
+            KeyCode::Right | KeyCode::Tab | KeyCode::Char('n') | KeyCode::Char(']') => v.step_file(1),
+            KeyCode::Left | KeyCode::BackTab | KeyCode::Char('p') | KeyCode::Char('[') => v.step_file(-1),
+            KeyCode::Char('c') => {
+                self.run_action(Action::GitCommit);
+                return;
+            }
+            KeyCode::Char('P') => {
+                self.run_action(Action::GitPush);
+                return;
+            }
+            KeyCode::Char('r') => match crate::diff::load(&v.dir) {
+                Ok(files) if !files.is_empty() => {
+                    let sel = v.sel.min(files.len() - 1);
+                    v.files = files;
+                    v.select(sel);
+                    self.toast("Обновлено");
+                }
+                Ok(_) => {
+                    self.toast("Изменений больше нет");
+                    return;
+                }
+                Err(e) => self.toast(e),
+            },
+            _ => {}
+        }
+        self.mode = Mode::Diff(v);
+    }
+
+    fn mouse_diff(&mut self, m: MouseEvent) {
+        let Mode::Diff(mut v) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            return;
+        };
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        let (popup, list, body) = ui::diff_layout(area);
+        let h = body.height as usize;
+        let (x, y) = (m.column, m.row);
+        match m.kind {
+            MouseEventKind::ScrollDown => v.scroll_by(3, h),
+            MouseEventKind::ScrollUp => v.scroll_by(-3, h),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if !in_rect(&popup, x, y) {
+                    return; // клик вне окна — закрыть
+                }
+                if in_rect(&list, x, y) {
+                    let first = ui::diff_list_first(&v, list.height as usize);
+                    v.select(first + (y - list.y) as usize);
+                }
+            }
+            _ => {}
+        }
+        self.mode = Mode::Diff(v);
+    }
+
     fn key_integrations(&mut self, mut sel: usize, k: KeyEvent) {
         let n = self.integration_rows().len().max(1);
         match k.code {
@@ -1265,6 +1601,48 @@ impl App {
         }
     }
 
+    fn key_log(&mut self, mut sel: usize, k: KeyEvent) {
+        let n = self.events.items.len();
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l') => return,
+            KeyCode::Down | KeyCode::Char('j') => sel = (sel + 1).min(n.saturating_sub(1)),
+            KeyCode::Up | KeyCode::Char('k') => sel = sel.saturating_sub(1),
+            KeyCode::Home | KeyCode::Char('g') => sel = 0,
+            KeyCode::End | KeyCode::Char('G') => sel = n.saturating_sub(1),
+            KeyCode::Enter => {
+                self.log_jump(sel);
+                return;
+            }
+            _ => {}
+        }
+        self.mode = Mode::Log(sel);
+    }
+
+    /// Переходит к агенту, о котором событие (если он ещё в списке).
+    fn log_jump(&mut self, sel: usize) {
+        let n = self.events.items.len();
+        let Some(e) = n.checked_sub(1 + sel).and_then(|i| self.events.items.get(i)) else {
+            return;
+        };
+        let sid = e.session;
+        match self.sessions.iter().position(|s| s.id == sid) {
+            Some(i) if sid != 0 => self.select(i),
+            _ => self.toast("Этого агента уже нет в списке"),
+        }
+    }
+
+    fn mouse_log(&mut self, sel: usize, x: u16, y: u16) {
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        let (popup, rows, first) = ui::log_layout(area, self.events.items.len(), sel);
+        self.mode = Mode::Log(sel);
+        if !in_rect(&popup, x, y) {
+            self.mode = Mode::Normal;
+        } else if let Some(i) = rows.iter().position(|r| in_rect(r, x, y)) {
+            self.mode = Mode::Normal;
+            self.log_jump(first + i);
+        }
+    }
+
     fn key_palette(&mut self, mut p: Palette, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let n = p.matches().len();
@@ -1290,11 +1668,123 @@ impl App {
         self.mode = Mode::Palette(p);
     }
 
+    /// «Разрешить» из списка: всегда через диалог с текстом запроса, вслепую ничего не подтверждаем.
+    pub fn can_approve(&self, i: usize) -> bool {
+        self.approve_state(i).is_ok()
+    }
+
+    /// Агенты, которые ждут ответа и которым можно ответить из списка (есть текст запроса).
+    fn approvable(&self) -> Vec<usize> {
+        (0..self.sessions.len()).filter(|&i| self.approve_state(i).is_ok()).collect()
+    }
+
+    /// Можно ли разрешить запрос агента `i`; иначе — почему нельзя.
+    fn approve_state(&self, i: usize) -> Result<String, String> {
+        let s = self.sessions.get(i).ok_or("Нет агента")?;
+        if s.status != Status::Waiting {
+            return Err("Агент ничего не просит: он не в статусе «ждёт ответа»".into());
+        }
+        let enabled = self.cfg.agents.iter().find(|d| d.name == s.agent).map(|d| !d.approve.is_empty()).unwrap_or(false);
+        if !enabled {
+            return Err(format!("Для «{}» подтверждение из списка не включено (approve в config.toml)", s.agent));
+        }
+        if s.note.is_empty() {
+            return Err("Текст запроса неизвестен — откройте агента и ответьте в его окне (нужна интеграция)".into());
+        }
+        Ok(s.note.clone())
+    }
+
+    /// `Ctrl+b y`: выбранный агент, если он ждёт, иначе ближайший ждущий из остальных.
+    fn approve_open(&mut self) {
+        let n = self.sessions.len();
+        if n == 0 {
+            self.toast("Нет агента");
+            return;
+        }
+        if self.approve_state(self.selected).is_ok() {
+            return self.approve_open_at(self.selected);
+        }
+        let waiting = (1..=n).map(|d| (self.selected + d) % n).find(|&i| self.approve_state(i).is_ok());
+        match waiting {
+            Some(i) => self.approve_open_at(i),
+            None => {
+                // объясняем причину по выбранному агенту (или по любому ждущему)
+                let why = self.approve_state(self.selected).err().unwrap_or_default();
+                self.toast(why);
+            }
+        }
+    }
+
+    fn approve_open_at(&mut self, i: usize) {
+        match self.approve_state(i) {
+            Ok(note) => {
+                let (_, hi) = crate::session::option_lines(&self.sessions[i].prompt_excerpt());
+                self.mode = Mode::Confirm(Confirm::Approve(i, note, hi));
+            }
+            Err(e) => self.toast(e),
+        }
+    }
+
+    fn approve_run(&mut self, i: usize, note: String, sel: Option<usize>) {
+        let Some(s) = self.sessions.get(i) else { return };
+        // запрос мог смениться, пока открыт диалог, — тогда не подтверждаем то, чего человек не видел
+        if s.status != Status::Waiting || s.note != note {
+            self.toast("Запрос изменился — откройте диалог ещё раз");
+            return;
+        }
+        let Some(bytes) = self.cfg.agents.iter().find(|d| d.name == s.agent).map(|d| d.approve.clone()) else {
+            return;
+        };
+        let excerpt = s.prompt_excerpt();
+        let (opts, hi) = crate::session::option_lines(&excerpt);
+        let (sid, ag, nm) = (s.id, s.agent.clone(), s.name.clone());
+        let app_cursor = s.app_cursor();
+        let mut answer = "разрешено".to_string();
+        // выбор варианта стрелками работает там, где «разрешить» — это Enter на выделенном пункте
+        if let (Some(sel), Some(hi), true) = (sel, hi, bytes == b"\r") {
+            let code = if sel > hi { KeyCode::Down } else { KeyCode::Up };
+            let key = KeyEvent::new(code, KeyModifiers::NONE);
+            let arrow = crate::input::key_to_bytes(key, app_cursor).unwrap_or_default();
+            for _ in 0..sel.abs_diff(hi) {
+                self.sessions[i].send_raw(&arrow);
+            }
+            if let Some(&line) = opts.get(sel) {
+                let text = excerpt[line].trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c)).to_string();
+                answer = format!("ответ — {text}");
+            }
+        }
+        self.sessions[i].send_raw(&bytes);
+        self.events.push(sid, ag, crate::events::Kind::Approved, format!("{nm}: {answer} · {note}"));
+        self.toast(format!("{}: {note}", if answer == "разрешено" { "Разрешено".to_string() } else { answer }));
+    }
+
     fn key_confirm(&mut self, c: Confirm, k: KeyEvent) {
+        if let Confirm::Approve(i, note, sel) = c {
+            let n = self
+                .sessions
+                .get(i)
+                .map(|s| crate::session::option_lines(&s.prompt_excerpt()).0.len())
+                .unwrap_or(0);
+            let keep = |app: &mut Self, sel: Option<usize>| app.mode = Mode::Confirm(Confirm::Approve(i, note.clone(), sel));
+            match k.code {
+                KeyCode::Down | KeyCode::Char('j') if n > 0 => keep(self, Some((sel.unwrap_or(0) + 1).min(n - 1))),
+                KeyCode::Up | KeyCode::Char('k') if n > 0 => keep(self, Some(sel.unwrap_or(0).saturating_sub(1))),
+                KeyCode::Char(d @ '1'..='9') if (d as usize - '0' as usize) <= n => {
+                    keep(self, Some(d as usize - '1' as usize))
+                }
+                KeyCode::Enter | KeyCode::Char('y' | 'Y' | 'н' | 'Н') => self.approve_run(i, note, sel),
+                _ => {}
+            }
+            return;
+        }
         if matches!(k.code, KeyCode::Char('y' | 'Y' | 'н' | 'Н') | KeyCode::Enter) {
             match c {
+                Confirm::Approve(..) => {}
                 Confirm::Close(i) => self.close(i),
                 Confirm::Quit => self.quit = true,
+                Confirm::Push(i) => self.git_push_run(i),
+                Confirm::Merge(i) => self.git_merge_run(i),
+                Confirm::RemoveWorktree(i) => self.git_remove_run(i),
             }
         }
     }
@@ -1329,10 +1819,23 @@ impl App {
                     Err(e) => f.error = Some(e.to_string()),
                 }
             }
+            KeyCode::Right | KeyCode::End if f.field == 1 && f.dir.cursor() == f.dir.text().chars().count() => {
+                // курсор в конце: → принимает серую подсказку
+                f.error = None;
+                if let Some(s) = crate::complete::suggest(&f.dir.text()) {
+                    f.dir = TextField::new(&s);
+                    f.hints.clear();
+                }
+            }
+            KeyCode::Tab if f.field == 1 => {
+                f.error = None;
+                form_complete(&mut f);
+            }
             KeyCode::Tab | KeyCode::Down => f.field = (f.field + 1) % 4,
             KeyCode::BackTab | KeyCode::Up => f.field = (f.field + 3) % 4,
             _ => {
                 f.error = None;
+                f.hints.clear();
                 match f.field {
                     0 => {
                         let vis = self.visible_agents(f.show_all);
@@ -1439,6 +1942,16 @@ impl App {
             }
             return;
         }
+        if matches!(self.mode, Mode::Diff(_)) {
+            self.mouse_diff(m);
+            return;
+        }
+        if let Mode::Log(sel) = self.mode {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.mouse_log(sel, x, y);
+            }
+            return;
+        }
         if let Mode::Integrations(sel) = self.mode {
             if m.kind == MouseEventKind::Down(MouseButton::Left) {
                 self.mouse_integrations(sel, x, y);
@@ -1475,24 +1988,54 @@ impl App {
                     self.open_new_form(None);
                 } else if in_rect(&self.geo.notif_btn, x, y) {
                     self.run_action(Action::ToggleNotifications);
-                } else if let Some(&(idx, _)) = self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)) {
+                } else if let Some(&(idx, r)) = self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)) {
                     self.select(idx);
+                    // клик по строке статуса «ждёт ответа» — сразу диалог разрешения
+                    if y == r.y + 1 && self.sessions[idx].status == Status::Waiting {
+                        self.approve_open_at(idx);
+                    }
+                } else if let Some(idx) = self
+                    .geo
+                    .panes
+                    .iter()
+                    .find(|p| p.header.map_or(false, |h| in_rect(&h, x, y)))
+                    .map(|p| p.idx)
+                    .filter(|&i| self.sessions[i].status == Status::Waiting)
+                {
+                    self.select(idx);
+                    self.approve_open_at(idx);
                 } else if let Some((idx, inner)) = pane {
-                    if idx == self.selected {
+                    self.sel = None;
+                    if idx == self.selected && !self.cfg.mouse_select {
                         self.forward_mouse(idx, inner, MouseEv::Down(0), mods, x, y);
+                    } else if idx == self.selected {
+                        // клик или начало выделения — решится по движению мыши
+                        self.press = Some((idx, inner, x, y, mods));
                     } else {
                         self.select(idx);
                     }
                 }
             }
-            MouseEventKind::Down(b @ MouseButton::Middle) | MouseEventKind::Up(b @ (MouseButton::Left | MouseButton::Middle)) => {
+            MouseEventKind::Up(MouseButton::Left) if !self.cfg.mouse_select => {
+                if let Some((idx, inner)) = pane.filter(|(i, _)| *i == self.selected) {
+                    self.forward_mouse(idx, inner, MouseEv::Up(0), mods, x, y);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if !self.cfg.mouse_select => {
+                if let Some((idx, inner)) = pane.filter(|(i, _)| *i == self.selected) {
+                    self.forward_mouse(idx, inner, MouseEv::Drag(0), mods, x, y);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.mouse_up_left(x, y),
+            MouseEventKind::Drag(MouseButton::Left) => self.mouse_drag_left(x, y),
+            MouseEventKind::Down(b @ MouseButton::Middle) | MouseEventKind::Up(b @ MouseButton::Middle) => {
                 if let Some((idx, inner)) = pane.filter(|(i, _)| *i == self.selected) {
                     let n = if b == MouseButton::Left { 0 } else { 1 };
                     let ev = if matches!(m.kind, MouseEventKind::Down(_)) { MouseEv::Down(n) } else { MouseEv::Up(n) };
                     self.forward_mouse(idx, inner, ev, mods, x, y);
                 }
             }
-            MouseEventKind::Drag(b @ (MouseButton::Left | MouseButton::Middle)) => {
+            MouseEventKind::Drag(b @ MouseButton::Middle) => {
                 if let Some((idx, inner)) = pane.filter(|(i, _)| *i == self.selected) {
                     let n = if b == MouseButton::Left { 0 } else { 1 };
                     self.forward_mouse(idx, inner, MouseEv::Drag(n), mods, x, y);
@@ -1513,9 +2056,63 @@ impl App {
         }
     }
 
+    /// Ячейка экрана агента под курсором мыши (с прижатием к границам окна).
+    fn pane_cell(inner: Rect, x: u16, y: u16) -> (u16, u16) {
+        let r = y.clamp(inner.y, inner.bottom().saturating_sub(1)) - inner.y;
+        let c = x.clamp(inner.x, inner.right().saturating_sub(1)) - inner.x;
+        (r, c)
+    }
+
+    /// Протянули мышь с нажатой левой кнопкой: начинаем или продолжаем выделение текста.
+    fn mouse_drag_left(&mut self, x: u16, y: u16) {
+        let Some((idx, inner, px, py, _)) = self.press else { return };
+        if self.sel.is_none() && (x, y) == (px, py) {
+            return;
+        }
+        let head = Self::pane_cell(inner, x, y);
+        let anchor = self.sel.map(|s| s.anchor).unwrap_or_else(|| Self::pane_cell(inner, px, py));
+        self.sel = Some(Selection { idx, anchor, head });
+        self.dirty = true;
+    }
+
+    /// Отпустили левую кнопку: после выделения — копируем, иначе это был обычный клик агенту.
+    fn mouse_up_left(&mut self, x: u16, y: u16) {
+        let Some((idx, inner, px, py, mods)) = self.press.take() else { return };
+        match self.sel {
+            Some(sel) => {
+                let text = self.selection_text(&sel);
+                if text.is_empty() {
+                    self.sel = None;
+                } else {
+                    let n = text.chars().count();
+                    let ok = crate::clipboard::copy(&text);
+                    self.toast(if ok { format!("Скопировано: {n} симв.") } else { "Не удалось скопировать".to_string() });
+                }
+            }
+            None => {
+                self.forward_mouse(idx, inner, MouseEv::Down(0), mods, px, py);
+                self.forward_mouse(idx, inner, MouseEv::Up(0), mods, x, y);
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// Текст выделения с экрана агента (с учётом прокрутки истории).
+    fn selection_text(&self, sel: &Selection) -> String {
+        let Some(s) = self.sessions.get(sel.idx) else { return String::new() };
+        let ((r0, c0), (r1, c1)) = sel.ordered();
+        let mut p = s.parser.lock().unwrap();
+        p.screen_mut().set_scrollback(s.scroll);
+        let (_, cols) = p.screen().size();
+        let text = p.screen().contents_between(r0, c0.min(cols), r1, (c1 + 1).min(cols));
+        p.screen_mut().set_scrollback(0);
+        text.lines().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n").trim_end().to_string()
+    }
+
     /// Колесо: агенту с включённой мышью — событие; полноэкранным программам (less, vim, htop) —
     /// стрелки; обычному выводу — прокрутка истории Radar.
     fn wheel(&mut self, idx: usize, inner: Rect, up: bool, mods: KeyModifiers, x: u16, y: u16) {
+        self.sel = None; // содержимое сдвинется — выделение потеряло бы смысл
         let Some(s) = self.sessions.get_mut(idx) else {
             return;
         };

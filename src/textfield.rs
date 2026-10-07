@@ -23,8 +23,7 @@ impl TextField {
         self.chars.is_empty()
     }
 
-    #[allow(dead_code)]
-    pub fn cursor(&self) -> usize {
+        pub fn cursor(&self) -> usize {
         self.cur
     }
 

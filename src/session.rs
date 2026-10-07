@@ -15,6 +15,13 @@ use std::time::{Duration, Instant};
 pub enum Msg {
     Output(u32),
     Exited(u32, i32),
+    /// Состояние git для агента (None — не репозиторий).
+    Git(u32, Option<crate::git::Info>),
+    /// Результат действия с git, выполненного в фоне (commit, push, merge…).
+    GitDone {
+        label: String,
+        result: Result<String, String>,
+    },
     Hook {
         session: u32,
         event: String,
@@ -48,6 +55,8 @@ pub struct Session {
     pub status: Status,
     pub status_since: Instant,
     pub work_started: Option<Instant>,
+    /// Сколько длилась последняя завершённая работа (для ленты событий).
+    pub last_worked: Option<Duration>,
     pub subtitle: String,
     /// Пояснение, пока агент ждёт ответа (например, какое разрешение просит Claude).
     pub note: String,
@@ -58,6 +67,7 @@ pub struct Session {
     pub muted: bool,
     pub size: (u16, u16),
     pub hooks_seen: bool,
+    pub git: Option<crate::git::Info>,
     /// Идентификатор диалога Claude Code (для восстановления после перезапуска Radar).
     pub resume_id: Option<String>,
     submitted: bool,
@@ -248,6 +258,7 @@ impl Session {
             status: Status::Starting,
             status_since: now,
             work_started: None,
+            last_worked: None,
             subtitle: String::new(),
             note: String::new(),
             exit_code: None,
@@ -256,6 +267,7 @@ impl Session {
             muted: false,
             size,
             hooks_seen: false,
+            git: None,
             resume_id: resume.map(String::from),
             submitted: false,
             typed: String::new(),
@@ -400,6 +412,15 @@ impl Session {
         a
     }
 
+    /// Вопрос агента и варианты ответа так, как они показаны на его экране (для диалога разрешения).
+    pub fn prompt_excerpt(&self) -> Vec<String> {
+        let p = self.parser.lock().unwrap();
+        let screen = p.screen();
+        let (_, cols) = screen.size();
+        let rows: Vec<String> = screen.rows(0, cols).collect();
+        excerpt(&rows)
+    }
+
     /// Нижние строки экрана агента (для эвристики).
     fn tail_text(&self) -> String {
         let p = self.parser.lock().unwrap();
@@ -415,7 +436,19 @@ impl Session {
 
     /// Периодическая проверка статуса для агентов без хуков.
     pub fn tick(&mut self) -> Option<Attention> {
-        if self.status == Status::Exited || self.hooks_seen {
+        if self.status == Status::Exited {
+            return None;
+        }
+        if self.hooks_seen {
+            // Хуки — отдельные процессы и могут прийти не по порядку или потеряться (последний
+            // PostToolUse после Stop). Если «работа» по хукам, а экран давно молчит и подсказки
+            // «esc to interrupt» нет — агент на самом деле закончил.
+            if self.status == Status::Working && self.last_activity.elapsed() >= status::HOOK_STUCK {
+                let tail = self.tail_text();
+                if !status::has_working_hint(&tail) {
+                    return self.set_status(Status::Idle);
+                }
+            }
             return None;
         }
         let tail = self.tail_text();
@@ -445,9 +478,21 @@ impl Session {
         };
         match event {
             "PermissionRequest" => {
+                // что именно просит агент: «run_shell_command: touch zz.txt»
+                let input = payload.get("tool_input");
+                let detail = ["command", "file_path", "path", "url", "description"]
+                    .iter()
+                    .find_map(|k| input.and_then(|i| i.get(*k)).and_then(|v| v.as_str()))
+                    .unwrap_or("");
+                let tool = str_of("tool_name");
                 let m = str_of("message");
-                if !m.is_empty() {
-                    self.note = m.chars().take(160).collect();
+                let text = match (tool.is_empty(), detail.is_empty()) {
+                    (false, false) => format!("{tool}: {detail}"),
+                    (false, true) => tool,
+                    _ => m,
+                };
+                if !text.is_empty() {
+                    self.note = text.replace('\n', " ").chars().take(160).collect();
                 }
                 self.set_status(Status::Waiting)
             }
@@ -472,7 +517,10 @@ impl Session {
                 "idle_prompt" => self.set_status(Status::Idle),
                 "auth_success" => None,
                 _ => {
-                    self.note = str_of("message").chars().take(160).collect();
+                    // более точное описание из PermissionRequest не затираем общим сообщением
+                    if !(self.status == Status::Waiting && !self.note.is_empty()) {
+                        self.note = str_of("message").chars().take(160).collect();
+                    }
                     self.set_status(Status::Waiting)
                 }
             },
@@ -503,6 +551,7 @@ impl Session {
             Status::Waiting => Some(Attention::NeedsInput),
             Status::Idle => {
                 let worked = self.work_started.take().map(|t| t.elapsed());
+                self.last_worked = worked;
                 match (prev, worked) {
                     (Status::Working | Status::Waiting, Some(d)) if d >= Duration::from_secs(5) => {
                         Some(Attention::Done)
@@ -512,5 +561,125 @@ impl Session {
             }
             _ => None,
         }
+    }
+}
+
+fn is_frame_char(c: char) -> bool {
+    c.is_whitespace() || ('\u{2500}'..='\u{257F}').contains(&c)
+}
+
+/// Из строк экрана выбирает вопрос с вариантами: вокруг последнего списка «1. …».
+/// Рамки и пустые строки отбрасываются; если списка нет — берутся последние строки.
+/// Номер варианта в начале строки («› 2. …» → 2) и отмечена ли строка маркером выбора.
+fn option_number(line: &str) -> Option<(usize, bool)> {
+    const MARKS: &str = "›❯>●○→";
+    let marked = line.trim_start().starts_with(|c| MARKS.contains(c));
+    let t = line.trim_start_matches(|c: char| c.is_whitespace() || MARKS.contains(c));
+    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let rest = &t[digits.len()..];
+    if digits.is_empty() || !(rest.starts_with('.') || rest.starts_with(')')) {
+        return None;
+    }
+    Some((digits.parse().ok()?, marked))
+}
+
+/// Строки выборки, которые являются вариантами ответа (подряд идущая нумерация с 1),
+/// и номер (по порядку) варианта, который агент сейчас выделил.
+pub fn option_lines(excerpt: &[String]) -> (Vec<usize>, Option<usize>) {
+    let mut idx = vec![];
+    let mut hi = None;
+    for (k, l) in excerpt.iter().enumerate() {
+        if let Some((n, marked)) = option_number(l) {
+            if n == idx.len() + 1 {
+                if marked {
+                    hi = Some(idx.len());
+                }
+                idx.push(k);
+            }
+        }
+    }
+    (idx, hi)
+}
+
+pub fn excerpt(rows: &[String]) -> Vec<String> {
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|r| r.trim_matches(is_frame_char).to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    let first_option = |s: &String| {
+        let t = s.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
+        let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits == "1" && t[1..].starts_with(|c| c == '.' || c == ')')
+    };
+    let (start, end) = match lines.iter().rposition(first_option) {
+        Some(i) => {
+            // вверх — до эха пользовательского запроса («> …») или ответа агента («● …»)
+            let mut start = i;
+            while start > 0 && i - start < 7 {
+                let prev = &lines[start - 1];
+                if prev.starts_with('>') || prev.starts_with('●') {
+                    break;
+                }
+                start -= 1;
+            }
+            (start, (i + 9).min(lines.len()))
+        }
+        None => (lines.len().saturating_sub(8), lines.len()),
+    };
+    lines[start..end].to_vec()
+}
+
+#[cfg(test)]
+mod excerpt_tests {
+    use super::*;
+
+    fn v(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn picks_question_around_options() {
+        let rows = v(&[
+            "старый вывод агента",
+            "│ ? Shell touch zz.txt │",
+            "",
+            "  Allow execution of: 'touch'?",
+            "  › 1. Yes, allow once",
+            "    2. Always allow",
+            "    4. No, suggest changes (esc)",
+            "──────────────",
+            "radar-test · git:(main)",
+        ]);
+        let e = excerpt(&rows);
+        assert!(e.iter().any(|l| l.contains("Allow execution")));
+        assert!(e.iter().any(|l| l.starts_with("› 1.")));
+        assert!(!e.iter().any(|l| l.chars().all(|c| c == '─')));
+    }
+
+    #[test]
+    fn finds_options_and_highlight() {
+        let e = v(&["Allow?", "  1. Yes", "› 2. Always", "  3. No", "⠏ Waiting"]);
+        let (idx, hi) = option_lines(&e);
+        assert_eq!(idx, vec![1, 2, 3]);
+        assert_eq!(hi, Some(1));
+        let (idx, hi) = option_lines(&v(&["просто текст", "1 штука"]));
+        assert!(idx.is_empty() && hi.is_none());
+    }
+
+    #[test]
+    fn stops_at_user_prompt_echo() {
+        let rows = v(&["шум", "> создай файл", "? Shell touch zz.txt", "Allow execution?", "› 1. Yes", "2. No"]);
+        let e = excerpt(&rows);
+        assert_eq!(e[0], "? Shell touch zz.txt");
+        assert_eq!(e.len(), 4);
+    }
+
+    #[test]
+    fn falls_back_to_tail() {
+        let rows: Vec<String> = (0..30).map(|i| format!("строка {i}")).collect();
+        let e = excerpt(&rows);
+        assert_eq!(e.len(), 8);
+        assert_eq!(e.last().unwrap(), "строка 29");
     }
 }

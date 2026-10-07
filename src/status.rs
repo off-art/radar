@@ -29,6 +29,8 @@ impl Status {
 
 /// Тишина в выводе, после которой агент считается закончившим работу.
 pub const QUIET: Duration = Duration::from_millis(2000);
+/// Тишина, после которой «работает» по хукам считается застрявшим статусом (хук Stop потерялся).
+pub const HOOK_STUCK: Duration = Duration::from_secs(6);
 /// Сколько экран должен «молчать», чтобы вопрос считался ожидающим ответа.
 pub const PROMPT_SETTLE: Duration = Duration::from_millis(700);
 
