@@ -29,15 +29,27 @@ pub fn start_server(path: &PathBuf, tx: Sender<Msg>) -> Result<()> {
         for stream in listener.incoming().flatten() {
             let tx = tx.clone();
             std::thread::spawn(move || {
-                let stream = stream;
+                let mut stream = stream;
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                 let mut s = String::new();
-                if stream.take(1 << 20).read_to_string(&mut s).is_err() {
+                if (&stream).take(1 << 20).read_to_string(&mut s).is_err() {
                     return;
                 }
                 let Ok(v) = serde_json::from_str::<Value>(&s) else {
                     return;
                 };
+                if v.get("ctl").is_some() {
+                    // команда radar ctl: выполняет главный цикл, ответ пишем в тот же сокет
+                    let (rtx, rrx) = std::sync::mpsc::channel();
+                    let reply = if tx.send(Msg::Ctl { req: v, reply: rtx }).is_ok() {
+                        rrx.recv_timeout(Duration::from_secs(5))
+                            .unwrap_or_else(|_| json!({"ok": false, "error": "Radar не ответил"}))
+                    } else {
+                        json!({"ok": false, "error": "Radar закрывается"})
+                    };
+                    let _ = stream.write_all(reply.to_string().as_bytes());
+                    return;
+                }
                 let session = v.get("session").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
                 let event = v.get("event").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let payload = v.get("payload").cloned().unwrap_or(Value::Null);

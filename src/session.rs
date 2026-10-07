@@ -22,6 +22,11 @@ pub enum Msg {
         label: String,
         result: Result<String, String>,
     },
+    /// Команда `radar ctl`: ответ уходит в `reply`.
+    Ctl {
+        req: serde_json::Value,
+        reply: Sender<serde_json::Value>,
+    },
     Hook {
         session: u32,
         event: String,
@@ -419,6 +424,17 @@ impl Session {
         let (_, cols) = screen.size();
         let rows: Vec<String> = screen.rows(0, cols).collect();
         excerpt(&rows)
+    }
+
+    /// Последние `lines` непустых строк экрана (для `radar ctl read`).
+    pub fn screen_text(&self, lines: usize) -> String {
+        let p = self.parser.lock().unwrap();
+        let screen = p.screen();
+        let (_, cols) = screen.size();
+        let rows: Vec<String> = screen.rows(0, cols).map(|r| r.trim_end().to_string()).collect();
+        let end = rows.iter().rposition(|r| !r.is_empty()).map_or(0, |i| i + 1);
+        let start = end.saturating_sub(lines.max(1));
+        rows[start..end].join("\n")
     }
 
     /// Нижние строки экрана агента (для эвристики).

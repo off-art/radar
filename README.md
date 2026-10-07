@@ -257,6 +257,33 @@ radar ~/work/api gigacode    # GigaCode CLI в папке проекта
 мышь совсем (`mouse = false`), работает родное выделение терминала. Выделить текст «в обход» Radar можно и при включённой мыши: с зажатым Option (iTerm2)
 или Fn (Terminal.app) — но так выделится и содержимое списка агентов.
 
+## Управление из скриптов (`radar ctl`)
+
+Пока Radar открыт в одном окне, им можно управлять из другого терминала или скрипта:
+
+```sh
+radar ctl list [--json]                       # агенты, статусы, ветки
+radar ctl new claude ~/proj/api --name api    # запустить агента (--worktree — в отдельном worktree)
+radar ctl send api "прогони тесты и почини"   # отправить текст и Enter (--no-enter — без Enter, «-» — из stdin)
+radar ctl status api [--json]                 # starting / working / waiting / idle / exited
+radar ctl read api --lines 30                 # последние строки экрана агента
+radar ctl wait api --timeout 600              # ждать, пока агент закончит
+radar ctl close api
+```
+
+Агента можно указать номером (из `list`), именем или началом имени. `wait` завершается кодом `0` (готов),
+`3` (ждёт ответа), `4` (завершён) или `124` (время вышло); чтобы не поймать старое состояние сразу после `send`,
+он ждёт, пока агент простоит спокойно `--settle` секунд (по умолчанию 1,5). Пример: поднять двух агентов и дождаться обоих:
+
+```sh
+radar ctl new claude . --name review && radar ctl send review "сделай ревью последнего коммита"
+radar ctl new claude . --name tests  && radar ctl send tests  "допиши тесты для src/auth"
+radar ctl wait review; radar ctl wait tests; radar ctl read review --lines 40
+```
+
+Команды идут через unix-сокет Radar с правами только владельца (`0600`). Если открыто несколько окон Radar, берётся
+последнее; точнее — `--sock ПУТЬ`. Внутри агента, запущенного в Radar, переменная `RADAR_SOCK` уже указывает на «своё» окно.
+
 ## Восстановление агентов
 
 Radar запоминает открытых агентов (тип, папку, имя, «без уведомлений», выбранного) в

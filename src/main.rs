@@ -1,6 +1,7 @@
 mod app;
 mod clipboard;
 mod complete;
+mod ctl;
 mod config;
 mod diff;
 mod events;
@@ -30,6 +31,7 @@ Radar — несколько AI-агентов в одном окне терми
 Использование:
   radar [папка] [агент ...]  открыть интерфейс
   radar doctor               проверить, какие агенты установлены
+  radar ctl <команда>        управлять запущенным Radar из скриптов (radar ctl --help)
   radar update [--check]     обновить Radar до последней версии (--check — только проверить)
   radar notify-test          проверить уведомления, иконку и звук
   radar integration [install|uninstall <агент>|all]
@@ -124,6 +126,16 @@ fn main() -> Result<()> {
         Some("-V") | Some("--version") => {
             println!("radar {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
+        }
+        Some("ctl") => {
+            match ctl::run(&args[1..]) {
+                Ok(0) => return Ok(()),
+                Ok(code) => std::process::exit(code),
+                Err(e) => {
+                    eprintln!("radar ctl: {e:#}");
+                    std::process::exit(1);
+                }
+            }
         }
         Some("doctor") => return doctor(),
         Some("update") => {
