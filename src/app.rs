@@ -146,6 +146,8 @@ pub struct App {
     pub sel: Option<Selection>,
     /// Нажатая левая кнопка в окне агента: ждём, будет ли это клик (уйдёт агенту) или выделение.
     press: Option<(usize, Rect, u16, u16, KeyModifiers)>,
+    /// Агент, которого тянут мышью по списку (перестановка).
+    drag_item: Option<usize>,
     git: crate::git::Watcher,
     pub dirty: bool,
     pub started: Instant,
@@ -257,6 +259,7 @@ impl App {
             events: Default::default(),
             sel: None,
             press: None,
+            drag_item: None,
             git: crate::git::Watcher::start(tx.clone()),
             dirty: true,
             started: Instant::now(),
@@ -526,6 +529,23 @@ impl App {
             self.sessions[idx].unread = false;
             self.dirty = true;
         }
+    }
+
+    /// Переставляет агента `from` на место `to` (выбранный агент остаётся выбранным).
+    fn move_session(&mut self, from: usize, to: usize) {
+        let n = self.sessions.len();
+        if from >= n || to >= n || from == to {
+            return;
+        }
+        let cur = self.sessions[self.selected.min(n - 1)].id;
+        let s = self.sessions.remove(from);
+        self.sessions.insert(to, s);
+        if let Some(i) = self.sessions.iter().position(|s| s.id == cur) {
+            self.selected = i;
+        }
+        self.sel = None;
+        self.press = None;
+        self.dirty = true;
     }
 
     fn select_rel(&mut self, delta: isize) {
@@ -916,6 +936,8 @@ impl App {
             Action::GitPush if has => self.git_confirm(Action::GitPush),
             Action::GitMerge if has => self.git_confirm(Action::GitMerge),
             Action::GitRemoveWorktree if has => self.git_confirm(Action::GitRemoveWorktree),
+            Action::MoveUp if has => self.move_session(self.selected, self.selected.wrapping_sub(1)),
+            Action::MoveDown if has => self.move_session(self.selected, self.selected + 1),
             Action::Next => self.select_rel(1),
             Action::Prev => self.select_rel(-1),
             Action::Select(i) => self.select(i),
@@ -1033,6 +1055,14 @@ impl App {
             items.push(MenuItem::sep());
         }
         items.push(MenuItem::new("Переименовать…", Action::Rename, "r"));
+        if self.sessions.len() > 1 {
+            let mut up = MenuItem::new("Выше в списке", Action::MoveUp, "K");
+            up.enabled = idx > 0;
+            let mut down = MenuItem::new("Ниже в списке", Action::MoveDown, "J");
+            down.enabled = idx + 1 < self.sessions.len();
+            items.push(up);
+            items.push(down);
+        }
         let mut restart = MenuItem::new("Перезапустить", Action::Restart, "R");
         if s.is_running() {
             restart = restart.disabled();
@@ -1990,6 +2020,7 @@ impl App {
                     self.run_action(Action::ToggleNotifications);
                 } else if let Some(&(idx, r)) = self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)) {
                     self.select(idx);
+                    self.drag_item = Some(idx);
                     // клик по строке статуса «ждёт ответа» — сразу диалог разрешения
                     if y == r.y + 1 && self.sessions[idx].status == Status::Waiting {
                         self.approve_open_at(idx);
@@ -2024,6 +2055,17 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) if !self.cfg.mouse_select => {
                 if let Some((idx, inner)) = pane.filter(|(i, _)| *i == self.selected) {
                     self.forward_mouse(idx, inner, MouseEv::Drag(0), mods, x, y);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.drag_item.is_some() => self.drag_item = None,
+            MouseEventKind::Drag(MouseButton::Left) if self.drag_item.is_some() => {
+                if let (Some(from), Some(&(to, _))) =
+                    (self.drag_item, self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)))
+                {
+                    if from != to {
+                        self.move_session(from, to);
+                        self.drag_item = Some(to);
+                    }
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => self.mouse_up_left(x, y),

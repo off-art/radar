@@ -43,6 +43,9 @@ pub enum Action {
     GitRemoveWorktree,
     Next,
     Prev,
+    /// Переставить выбранного агента выше/ниже в списке.
+    MoveUp,
+    MoveDown,
     Select(usize),
     NextWaiting,
     ScrollUp,
@@ -82,6 +85,8 @@ impl Action {
             "git_push" => Action::GitPush,
             "git_merge" => Action::GitMerge,
             "git_remove_worktree" => Action::GitRemoveWorktree,
+            "move_up" => Action::MoveUp,
+            "move_down" => Action::MoveDown,
             "next" => Action::Next,
             "prev" => Action::Prev,
             "waiting" => Action::NextWaiting,
@@ -224,6 +229,8 @@ pub fn nav_action(k: &KeyEvent) -> Option<(Action, bool)> {
     Some(match k.code {
         KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab | KeyCode::Char(')') => (Next, true),
         KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab | KeyCode::Char('(') => (Prev, true),
+        KeyCode::Char('K') => (MoveUp, true),
+        KeyCode::Char('J') => (MoveDown, true),
         KeyCode::Char(d @ '1'..='9') => (Select(d as usize - '1' as usize), true),
         KeyCode::PageUp | KeyCode::Char('[') | KeyCode::Char('u') => (ScrollUp, true),
         KeyCode::PageDown | KeyCode::Char(']') | KeyCode::Char('d') => (ScrollDown, true),
@@ -287,6 +294,8 @@ mod tests {
     fn nav_keys() {
         let k = |c| key(KeyCode::Char(c), KeyModifiers::empty());
         assert_eq!(nav_action(&k('j')), Some((Action::Next, true)));
+        assert_eq!(nav_action(&k('K')), Some((Action::MoveUp, true)));
+        assert_eq!(nav_action(&k('J')), Some((Action::MoveDown, true)));
         assert_eq!(nav_action(&k('x')), Some((Action::Close, false)));
         assert_eq!(nav_action(&k('~')), None);
     }
