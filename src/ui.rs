@@ -113,6 +113,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match &app.mode {
         Mode::New(form) => draw_form(f, app, form),
         Mode::Rename(t) => draw_input_popup(f, "Переименовать агента", t, &app.theme),
+        Mode::Group(t) => draw_input_popup(f, "Группа (пусто — по папке)", t, &app.theme),
         Mode::Confirm(c) => draw_confirm(f, app, c),
         Mode::Help => draw_help(f, app),
         Mode::Menu(m) => draw_menu(f, m, &app.theme),
@@ -191,6 +192,46 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
         ));
     }
     buf.set_line(area.x, area.y + 1, &Line::from(sum), w as u16);
+
+    for (key, first, count, rect) in &g.headers {
+        let collapsed = app.collapsed.contains(key);
+        let members = &app.sessions[*first..*first + *count];
+        let sel = collapsed && (*first..*first + *count).contains(&app.selected);
+        let bg = if sel { Style::default().bg(th.active_row_bg) } else { Style::default() };
+        buf.set_style(*rect, bg);
+        let (mut wk, mut wt, mut id) = (0, 0, 0);
+        for m in members {
+            match m.status {
+                Status::Working => wk += 1,
+                Status::Waiting => wt += 1,
+                Status::Idle => id += 1,
+                _ => {}
+            }
+        }
+        let mut right: Vec<Span> = vec![];
+        if wk > 0 {
+            right.push(Span::styled(format!(" {} {}", SPINNER[(ms / 80) as usize % 10], wk), bg.fg(th.blue)));
+        }
+        if wt > 0 {
+            right.push(Span::styled(format!(" ● {wt}"), bg.fg(th.accent).add_modifier(Modifier::BOLD)));
+        }
+        if id > 0 {
+            right.push(Span::styled(format!(" ✓ {id}"), bg.fg(th.green)));
+        }
+        let rw: usize = right.iter().map(|s| s.content.width()).sum();
+        let arrow = if collapsed { "▸" } else { "▾" };
+        let name_w = w.saturating_sub(3 + rw + 5);
+        let label = fit(key, name_w);
+        let used = 3 + label.width() + format!(" {count}").width();
+        let mut l = vec![
+            Span::styled(format!(" {arrow} "), bg.fg(th.subtext)),
+            Span::styled(label, bg.fg(th.subtext).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {count}"), bg.fg(th.dim)),
+            Span::styled(" ".repeat(w.saturating_sub(used + rw + 1)), bg),
+        ];
+        l.extend(right);
+        buf.set_line(rect.x, rect.y, &Line::from(l), w as u16);
+    }
 
     for &(idx, rect) in &g.items {
         let s = &app.sessions[idx];
@@ -1067,6 +1108,7 @@ fn draw_help(f: &mut Frame, app: &App) {
         ("  x".into(), "закрыть агента"),
         ("  r / R".into(), "переименовать / перезапустить завершившегося"),
         ("  w".into(), "к агенту, который ждёт ответа"),
+        ("  o / G".into(), "свернуть группу / задать группу выбранного агента"),
         ("  K / J".into(), "переставить агента выше / ниже в списке (или перетащить мышью)"),
         ("  g".into(), "сетка ⇄ один агент"),
         ("  m / M".into(), "тишина для агента / все уведомления"),

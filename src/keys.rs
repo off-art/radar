@@ -15,6 +15,10 @@ pub enum Action {
     NewHere,
     Close,
     Rename,
+    /// Задать группу выбранного агента.
+    Group,
+    /// Свернуть/развернуть группу выбранного агента.
+    ToggleGroup,
     Restart,
     ToggleMute,
     ToggleGrid,
@@ -70,6 +74,8 @@ impl Action {
             "new_here" => Action::NewHere,
             "close" => Action::Close,
             "rename" => Action::Rename,
+            "group" => Action::Group,
+            "toggle_group" => Action::ToggleGroup,
             "restart" => Action::Restart,
             "mute" => Action::ToggleMute,
             "grid" => Action::ToggleGrid,
@@ -250,6 +256,8 @@ pub fn nav_action(k: &KeyEvent) -> Option<(Action, bool)> {
         KeyCode::Char('N') => (NewHere, false),
         KeyCode::Char('x') | KeyCode::Char('&') => (Close, false),
         KeyCode::Char('r') => (Rename, false),
+        KeyCode::Char('G') => (Group, false),
+        KeyCode::Char('o') => (ToggleGroup, true),
         KeyCode::Char('R') => (Restart, false),
         KeyCode::Char('p') | KeyCode::Char(' ') | KeyCode::Char('/') => (Palette, false),
         KeyCode::Char('?') => (Help, false),

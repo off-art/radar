@@ -20,6 +20,9 @@ pub struct Saved {
     /// Идентификатор диалога для продолжения (`claude --resume`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<String>,
+    /// Группа, заданная вручную.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq)]
@@ -28,6 +31,9 @@ pub struct File {
     pub selected: usize,
     #[serde(default, rename = "session")]
     pub sessions: Vec<Saved>,
+    /// Свёрнутые группы.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collapsed: Vec<String>,
 }
 
 pub fn path() -> PathBuf {
@@ -66,8 +72,9 @@ mod tests {
             selected: 1,
             sessions: vec![
                 Saved { agent: "Claude Code".into(), dir: "/a b".into(), name: "api".into(), resume: Some("abc".into()), ..Default::default() },
-                Saved { agent: "Codex".into(), dir: "/x".into(), name: "x #2".into(), muted: true, worktree: Some("/w".into()), resume: None },
+                Saved { agent: "Codex".into(), dir: "/x".into(), name: "x #2".into(), muted: true, worktree: Some("/w".into()), resume: None, group: Some("Фронт".into()) },
             ],
+            collapsed: vec!["api".into()],
         };
         let back: File = toml::from_str(&to_text(&f)).unwrap();
         assert_eq!(back, f);

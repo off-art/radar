@@ -7,6 +7,7 @@ mod diff;
 mod events;
 mod git;
 mod gitops;
+mod groups;
 mod hook;
 mod host;
 mod input;
