@@ -15,8 +15,21 @@ pub enum Action {
     NewHere,
     Close,
     Rename,
-    /// Задать группу выбранного агента.
+    /// Создать группу (с выбором агентов галочками).
+    NewGroup,
+    /// Переместить выбранного агента в группу.
     Group,
+    /// Убрать выбранного агента из группы.
+    Ungroup,
+    /// Переместить выбранного агента в группу с номером.
+    MoveToGroup(usize),
+    /// Переименовать группу / изменить состав.
+    EditGroup(usize),
+    DeleteGroup(usize),
+    MoveGroupUp(usize),
+    MoveGroupDown(usize),
+    /// Свернуть/развернуть группу с номером.
+    ToggleGroupAt(usize),
     /// Свернуть/развернуть группу выбранного агента.
     ToggleGroup,
     Restart,
@@ -74,6 +87,7 @@ impl Action {
             "new_here" => Action::NewHere,
             "close" => Action::Close,
             "rename" => Action::Rename,
+            "new_group" => Action::NewGroup,
             "group" => Action::Group,
             "toggle_group" => Action::ToggleGroup,
             "restart" => Action::Restart,
@@ -256,7 +270,8 @@ pub fn nav_action(k: &KeyEvent) -> Option<(Action, bool)> {
         KeyCode::Char('N') => (NewHere, false),
         KeyCode::Char('x') | KeyCode::Char('&') => (Close, false),
         KeyCode::Char('r') => (Rename, false),
-        KeyCode::Char('G') => (Group, false),
+        KeyCode::Char('G') => (NewGroup, false),
+        KeyCode::Char('a') => (Group, false),
         KeyCode::Char('o') => (ToggleGroup, true),
         KeyCode::Char('R') => (Restart, false),
         KeyCode::Char('p') | KeyCode::Char(' ') | KeyCode::Char('/') => (Palette, false),

@@ -113,7 +113,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match &app.mode {
         Mode::New(form) => draw_form(f, app, form),
         Mode::Rename(t) => draw_input_popup(f, "Переименовать агента", t, &app.theme),
-        Mode::Group(t) => draw_input_popup(f, "Группа (пусто — по папке)", t, &app.theme),
+        Mode::GroupForm(g) => draw_group_form(f, app, g),
         Mode::Confirm(c) => draw_confirm(f, app, c),
         Mode::Help => draw_help(f, app),
         Mode::Menu(m) => draw_menu(f, m, &app.theme),
@@ -193,9 +193,17 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
     }
     buf.set_line(area.x, area.y + 1, &Line::from(sum), w as u16);
 
+    for (t, rect) in &g.texts {
+        buf.set_line(rect.x, rect.y, &Line::from(Span::styled(fit(t, w), Style::default().fg(th.dim))), w as u16);
+    }
+    if g.group_btn.width > 0 {
+        let btn = Line::from(Span::styled(" + группа ", Style::default().fg(th.on_color).bg(th.dim)));
+        buf.set_line(g.group_btn.x, g.group_btn.y, &btn, g.group_btn.width);
+    }
+
     for (key, first, count, rect) in &g.headers {
         let collapsed = app.collapsed.contains(key);
-        let members = &app.sessions[*first..*first + *count];
+        let members = &app.sessions[(*first).min(app.sessions.len())..(*first + *count).min(app.sessions.len())];
         let sel = collapsed && (*first..*first + *count).contains(&app.selected);
         let bg = if sel { Style::default().bg(th.active_row_bg) } else { Style::default() };
         buf.set_style(*rect, bg);
@@ -855,6 +863,47 @@ fn draw_input_popup(f: &mut Frame, title: &str, value: &TextField, th: &Theme) {
     );
 }
 
+fn draw_group_form(f: &mut Frame, app: &App, g: &crate::app::GroupForm) {
+    let th = &app.theme;
+    let rows = g.ids.len().min(12) as u16;
+    let r = centered(f.area(), 64, 8 + rows.max(1));
+    clear(f, r, th);
+    let title = if g.orig.is_some() { "Группа: имя и состав" } else { "Новая группа" };
+    let block = popup_block(th, title);
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    let mut lines = vec![
+        Line::from(vec![Span::styled("Имя: ", Style::default().fg(th.dim))]),
+        Line::from(field_spans(&g.name, g.focus == 0)),
+        Line::from(""),
+        Line::from(Span::styled("Агенты в группе:", Style::default().fg(th.dim))),
+    ];
+    if g.ids.is_empty() {
+        lines.push(Line::from(Span::styled("  агентов пока нет — группу можно создать пустой", Style::default().fg(th.dim))));
+    }
+    // окно прокрутки вокруг курсора
+    let first = g.cursor.saturating_sub(rows.saturating_sub(1) as usize).min(g.ids.len().saturating_sub(rows as usize));
+    for (n, id) in g.ids.iter().enumerate().skip(first).take(rows as usize) {
+        let Some(s) = app.sessions.iter().find(|s| s.id == *id) else { continue };
+        let on = g.checked.get(n).copied().unwrap_or(false);
+        let here = g.focus == 1 && n == g.cursor;
+        let base = if here { Style::default().fg(th.on_color).bg(th.accent) } else { Style::default() };
+        let other = s.group.as_deref().filter(|x| !on && Some(*x) != g.orig.and_then(|i| app.groups.get(i)).map(String::as_str));
+        let tail = other.map(|o| format!("  (сейчас в «{o}»)")).unwrap_or_default();
+        lines.push(Line::from(vec![
+            Span::styled(format!(" [{}] ", if on { "x" } else { " " }), base),
+            Span::styled(fit(&s.name, 22), base.add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  {}{}", s.agent, tail), if here { base } else { Style::default().fg(th.dim) }),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Tab — имя/список · Пробел — отметить · Enter — готово · Esc",
+        Style::default().fg(th.dim),
+    )));
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 fn draw_menu(f: &mut Frame, m: &Menu, th: &Theme) {
     let r = m.rect;
     clear(f, r, th);
@@ -1036,6 +1085,16 @@ fn confirm_view(app: &App, c: &Confirm) -> ConfirmView {
             }
             x
         }
+        Confirm::DeleteGroup(i) => {
+            let n = app.groups.get(*i).map_or(0, |g| app.sessions.iter().filter(|s| s.group.as_deref() == Some(g.as_str())).count());
+            let mut x = v("Удалить группу?", app.groups.get(*i).cloned().unwrap_or_default(), "Удалить");
+            x.detail = Some(if n > 0 {
+                format!("Агенты ({n}) останутся в списке без группы")
+            } else {
+                "Группа пустая".into()
+            });
+            x
+        }
         Confirm::Quit => {
             let mut x = v("Выйти из Radar?", "Окно закроется".into(), "Выйти");
             if running > 0 {
@@ -1108,7 +1167,7 @@ fn draw_help(f: &mut Frame, app: &App) {
         ("  x".into(), "закрыть агента"),
         ("  r / R".into(), "переименовать / перезапустить завершившегося"),
         ("  w".into(), "к агенту, который ждёт ответа"),
-        ("  o / G".into(), "свернуть группу / задать группу выбранного агента"),
+        ("  G / a / o".into(), "создать группу / переместить агента в группу / свернуть группу"),
         ("  K / J".into(), "переставить агента выше / ниже в списке (или перетащить мышью)"),
         ("  g".into(), "сетка ⇄ один агент"),
         ("  m / M".into(), "тишина для агента / все уведомления"),

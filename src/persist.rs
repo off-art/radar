@@ -20,7 +20,7 @@ pub struct Saved {
     /// Идентификатор диалога для продолжения (`claude --resume`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<String>,
-    /// Группа, заданная вручную.
+    /// Группа в списке.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
 }
@@ -31,6 +31,9 @@ pub struct File {
     pub selected: usize,
     #[serde(default, rename = "session")]
     pub sessions: Vec<Saved>,
+    /// Группы списка по порядку (в том числе пустые).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
     /// Свёрнутые группы.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub collapsed: Vec<String>,
@@ -74,6 +77,7 @@ mod tests {
                 Saved { agent: "Claude Code".into(), dir: "/a b".into(), name: "api".into(), resume: Some("abc".into()), ..Default::default() },
                 Saved { agent: "Codex".into(), dir: "/x".into(), name: "x #2".into(), muted: true, worktree: Some("/w".into()), resume: None, group: Some("Фронт".into()) },
             ],
+            groups: vec!["Фронт".into(), "пустая".into()],
             collapsed: vec!["api".into()],
         };
         let back: File = toml::from_str(&to_text(&f)).unwrap();

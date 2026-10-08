@@ -1,53 +1,56 @@
-//! Группы агентов в списке: порядок, строки списка, сворачивание.
-//!
-//! Группа задаётся вручную («Группа…») или автоматически — по имени папки агента.
-//! Заголовок показывается, если в группе два и больше агентов или она задана вручную.
-//! Агенты одной группы всегда идут подряд (см. `order`).
+//! Группы агентов в списке. Группы создаёт пользователь (в том числе пустые);
+//! агенты одной группы идут подряд, агенты без группы — после всех групп.
 
 use std::collections::HashSet;
-use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Row {
+    /// Заголовок группы: имя, индекс первого агента, число агентов, свёрнута ли.
     Header { key: String, first: usize, count: usize, collapsed: bool },
     Item(usize),
+    /// Поясняющая строка («Без группы», «пусто»).
+    Text(String),
 }
 
-/// Группа по умолчанию — имя папки.
-pub fn auto_key(cwd: &Path) -> String {
-    cwd.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "/".into())
+/// Индекс группы для каждого агента (`None` — без группы или группы нет в списке).
+pub fn index_of(groups: &[String], member: Option<&str>) -> Option<usize> {
+    member.and_then(|m| groups.iter().position(|g| g == m))
 }
 
-/// Новый порядок агентов: группы идут блоками в порядке первого появления,
-/// внутри группы порядок сохраняется. Возвращает индексы старого списка.
-pub fn order(keys: &[String]) -> Vec<usize> {
-    let mut uniq: Vec<&String> = vec![];
-    for k in keys {
-        if !uniq.contains(&k) {
-            uniq.push(k);
-        }
-    }
-    uniq.iter().flat_map(|u| keys.iter().enumerate().filter(move |(_, k)| k == u).map(|(i, _)| i)).collect()
+/// Новый порядок агентов: блоки групп в порядке списка групп, затем агенты без группы;
+/// внутри блока порядок сохраняется. Возвращает индексы старого списка.
+pub fn order(group_idx: &[Option<usize>]) -> Vec<usize> {
+    let mut idx: Vec<usize> = (0..group_idx.len()).collect();
+    idx.sort_by_key(|&i| group_idx[i].unwrap_or(usize::MAX)); // сортировка устойчивая
+    idx
 }
 
-/// Строки списка. `items` — (ключ группы, задана ли вручную) для каждого агента по порядку.
-pub fn rows(items: &[(String, bool)], collapsed: &HashSet<String>) -> Vec<Row> {
+/// Строки списка. `group_idx` — группа каждого агента (в порядке агентов, уже собранных подряд).
+pub fn rows(groups: &[String], group_idx: &[Option<usize>], collapsed: &HashSet<String>) -> Vec<Row> {
     let mut out = vec![];
-    let mut i = 0;
-    while i < items.len() {
-        let mut j = i;
-        while j < items.len() && items[j].0 == items[i].0 {
-            j += 1;
+    for (gi, name) in groups.iter().enumerate() {
+        let members: Vec<usize> = (0..group_idx.len()).filter(|&i| group_idx[i] == Some(gi)).collect();
+        let is_collapsed = collapsed.contains(name);
+        out.push(Row::Header {
+            key: name.clone(),
+            first: members.first().copied().unwrap_or(0),
+            count: members.len(),
+            collapsed: is_collapsed,
+        });
+        if is_collapsed {
+            continue;
         }
-        let header = j - i >= 2 || items[i..j].iter().any(|x| x.1);
-        let is_collapsed = header && collapsed.contains(&items[i].0);
-        if header {
-            out.push(Row::Header { key: items[i].0.clone(), first: i, count: j - i, collapsed: is_collapsed });
+        if members.is_empty() {
+            out.push(Row::Text("   пусто".into()));
         }
-        if !is_collapsed {
-            out.extend((i..j).map(Row::Item));
+        out.extend(members.into_iter().map(Row::Item));
+    }
+    let loose: Vec<usize> = (0..group_idx.len()).filter(|&i| group_idx[i].is_none()).collect();
+    if !loose.is_empty() {
+        if !groups.is_empty() {
+            out.push(Row::Text(" Без группы".into()));
         }
-        i = j;
+        out.extend(loose.into_iter().map(Row::Item));
     }
     out
 }
@@ -56,42 +59,49 @@ pub fn rows(items: &[(String, bool)], collapsed: &HashSet<String>) -> Vec<Row> {
 mod tests {
     use super::*;
 
-    fn k(s: &[&str]) -> Vec<String> {
+    fn g(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| x.to_string()).collect()
     }
 
     #[test]
-    fn order_groups_blocks() {
-        assert_eq!(order(&k(&["a", "b", "a", "c", "b"])), vec![0, 2, 1, 4, 3]);
-        assert_eq!(order(&k(&[])), Vec::<usize>::new());
+    fn order_blocks_and_loose_last() {
+        let idx = vec![None, Some(1), Some(0), None, Some(1)];
+        assert_eq!(order(&idx), vec![2, 1, 4, 0, 3]);
+        assert_eq!(order(&[]), Vec::<usize>::new());
     }
 
     #[test]
-    fn single_auto_has_no_header() {
-        let items = vec![("a".to_string(), false), ("b".to_string(), false)];
-        let r = rows(&items, &HashSet::new());
+    fn index_lookup() {
+        let groups = g(&["a", "b"]);
+        assert_eq!(index_of(&groups, Some("b")), Some(1));
+        assert_eq!(index_of(&groups, Some("x")), None);
+        assert_eq!(index_of(&groups, None), None);
+    }
+
+    #[test]
+    fn no_groups_plain_list() {
+        let r = rows(&[], &[None, None], &HashSet::new());
         assert_eq!(r, vec![Row::Item(0), Row::Item(1)]);
     }
 
     #[test]
-    fn header_for_pair_and_manual() {
-        let items = vec![("a".to_string(), false), ("a".to_string(), false), ("m".to_string(), true)];
-        let r = rows(&items, &HashSet::new());
-        assert_eq!(r.len(), 5);
-        assert!(matches!(&r[0], Row::Header { key, first: 0, count: 2, collapsed: false } if key == "a"));
-        assert!(matches!(&r[3], Row::Header { key, count: 1, .. } if key == "m"));
+    fn empty_group_and_loose_label() {
+        let groups = g(&["пустая", "a"]);
+        let r = rows(&groups, &[Some(1), None], &HashSet::new());
+        assert!(matches!(&r[0], Row::Header { key, count: 0, .. } if key == "пустая"));
+        assert!(matches!(&r[1], Row::Text(_)));
+        assert!(matches!(&r[2], Row::Header { key, first: 0, count: 1, .. } if key == "a"));
+        assert_eq!(r[3], Row::Item(0));
+        assert_eq!(r[4], Row::Text(" Без группы".into()));
+        assert_eq!(r[5], Row::Item(1));
     }
 
     #[test]
-    fn collapsed_hides_items() {
-        let items = vec![("a".to_string(), false), ("a".to_string(), false), ("b".to_string(), false)];
+    fn collapsed_hides_members() {
+        let groups = g(&["a"]);
         let c: HashSet<String> = ["a".to_string()].into();
-        let r = rows(&items, &c);
-        assert_eq!(r.len(), 2);
-        assert!(matches!(&r[0], Row::Header { collapsed: true, .. }));
-        assert_eq!(r[1], Row::Item(2));
-        // одиночная автогруппа не сворачивается
-        let c: HashSet<String> = ["b".to_string()].into();
-        assert_eq!(rows(&items, &c).len(), 4);
+        let r = rows(&groups, &[Some(0), Some(0)], &c);
+        assert_eq!(r.len(), 1);
+        assert!(matches!(&r[0], Row::Header { collapsed: true, count: 2, .. }));
     }
 }

@@ -56,7 +56,7 @@ pub struct Session {
     pub kind: Kind,
     pub cwd: PathBuf,
     pub worktree: Option<PathBuf>,
-    /// Группа, заданная вручную (иначе — по имени папки).
+    /// Группа в списке (создаётся пользователем); `None` — без группы.
     pub group: Option<String>,
     pub parser: Arc<Mutex<vt100::Parser>>,
     pub status: Status,
@@ -176,11 +176,6 @@ pub fn feed(parser: &mut vt100::Parser, data: &[u8]) {
 }
 
 impl Session {
-    /// Ключ группы: заданный вручную или имя папки.
-    pub fn group_key(&self) -> String {
-        self.group.clone().unwrap_or_else(|| crate::groups::auto_key(&self.cwd))
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         id: u32,

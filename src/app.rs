@@ -55,6 +55,7 @@ impl Selection {
 
 pub enum Confirm {
     Close(usize),
+    DeleteGroup(usize),
     Quit,
     QuitStop,
     Push(usize),
@@ -63,6 +64,19 @@ pub enum Confirm {
     /// Разрешить запрос агента: (номер агента, текст запроса на момент диалога).
     /// Третье поле — выбранный в диалоге вариант ответа (по порядку), если на экране агента есть список.
     Approve(usize, String, Option<usize>),
+}
+
+/// Диалог группы: имя и галочки у агентов.
+pub struct GroupForm {
+    /// Номер редактируемой группы (`None` — новая).
+    pub orig: Option<usize>,
+    pub name: TextField,
+    /// Агенты (id) в порядке списка и их галочки.
+    pub ids: Vec<u32>,
+    pub checked: Vec<bool>,
+    pub cursor: usize,
+    /// 0 — поле имени, 1 — список агентов.
+    pub focus: u8,
 }
 
 pub struct Palette {
@@ -84,8 +98,8 @@ pub enum Mode {
     Nav(Instant),
     New(NewForm),
     Rename(TextField),
-    /// Ввод имени группы.
-    Group(TextField),
+    /// Создание/правка группы.
+    GroupForm(GroupForm),
     Confirm(Confirm),
     Help,
     Menu(Menu),
@@ -128,6 +142,10 @@ pub struct Geometry {
     pub items: Vec<(usize, Rect)>,
     /// Заголовки групп: (ключ, первый агент, число агентов, область).
     pub headers: Vec<(String, usize, usize, Rect)>,
+    /// Поясняющие строки списка («Без группы», «пусто»).
+    pub texts: Vec<(String, Rect)>,
+    /// Кнопка «+ группа».
+    pub group_btn: Rect,
     /// Кнопка «+ новый» в шапке списка.
     pub new_btn: Rect,
     /// Переключатель уведомлений в строке статуса.
@@ -167,6 +185,8 @@ pub struct App {
     sidebar_first: usize,
     /// Свёрнутые группы (по ключу).
     pub collapsed: HashSet<String>,
+    /// Группы списка по порядку (в том числе пустые).
+    pub groups: Vec<String>,
     term_focused: bool,
     focus_supported: bool,
     last_key: Instant,
@@ -281,6 +301,7 @@ impl App {
             available: Arc::new(Mutex::new(vec![])),
             sidebar_first: 0,
             collapsed: HashSet::new(),
+            groups: vec![],
             term_focused: true,
             focus_supported: false,
             last_key: Instant::now(),
@@ -533,6 +554,7 @@ impl App {
             s.group = saved.sessions.iter().find(|sv| sv.name == s.name).and_then(|sv| sv.group.clone());
             self.sessions.push(s);
         }
+        self.groups = saved.groups.clone();
         self.collapsed = saved.collapsed.iter().cloned().collect();
         if !self.sessions.is_empty() {
             self.selected = saved.selected.min(self.sessions.len() - 1);
@@ -572,6 +594,7 @@ impl App {
                 Err(_) => failed += 1,
             }
         }
+        self.groups = saved.groups.clone();
         self.collapsed = saved.collapsed.iter().cloned().collect();
         if !self.sessions.is_empty() {
             self.selected = saved.selected.min(self.sessions.len() - 1);
@@ -606,7 +629,7 @@ impl App {
         }
         let mut collapsed: Vec<String> = self.collapsed.iter().cloned().collect();
         collapsed.sort();
-        crate::persist::File { selected, sessions, collapsed }
+        crate::persist::File { selected, sessions, groups: self.groups.clone(), collapsed }
     }
 
     /// Записывает список агентов, если он изменился (вызывается из главного цикла).
@@ -675,8 +698,9 @@ impl App {
             self.selected = idx;
             self.sessions[idx].unread = false;
             // выбранный агент не должен прятаться в свёрнутой группе
-            let key = self.sessions[idx].group_key();
-            self.collapsed.remove(&key);
+            if let Some(g) = self.sessions[idx].group.clone() {
+                self.collapsed.remove(&g);
+            }
             self.dirty = true;
         }
     }
@@ -698,22 +722,31 @@ impl App {
         self.dirty = true;
     }
 
-    /// Группы и строки списка в порядке отображения.
-    pub fn sidebar_rows(&self) -> Vec<crate::groups::Row> {
-        let items: Vec<(String, bool)> = self.sessions.iter().map(|s| (s.group_key(), s.group.is_some())).collect();
-        crate::groups::rows(&items, &self.collapsed)
+    /// Номер группы каждого агента.
+    fn group_idx(&self) -> Vec<Option<usize>> {
+        self.sessions.iter().map(|s| crate::groups::index_of(&self.groups, s.group.as_deref())).collect()
     }
 
-    /// Собирает агентов одной группы подряд; выбранным остаётся агент `keep`.
+    /// Группы и строки списка в порядке отображения.
+    pub fn sidebar_rows(&self) -> Vec<crate::groups::Row> {
+        crate::groups::rows(&self.groups, &self.group_idx(), &self.collapsed)
+    }
+
+    /// Собирает агентов одной группы подряд (без группы — в конце); выбранным остаётся агент `keep`.
     fn normalize_groups(&mut self, keep: u32) {
-        // группа, совпавшая с папочной, — не «ручная»
-        for s in &mut self.sessions {
-            if s.group.as_deref() == Some(crate::groups::auto_key(&s.cwd).as_str()) {
-                s.group = None;
+        // группа, которой нет в списке (например, из старого файла), попадает в конец
+        let unknown: Vec<String> = self
+            .sessions
+            .iter()
+            .filter_map(|s| s.group.clone())
+            .filter(|g| !self.groups.contains(g))
+            .collect();
+        for g in unknown {
+            if !self.groups.contains(&g) {
+                self.groups.push(g);
             }
         }
-        let keys: Vec<String> = self.sessions.iter().map(|s| s.group_key()).collect();
-        let ord = crate::groups::order(&keys);
+        let ord = crate::groups::order(&self.group_idx());
         if ord.iter().enumerate().any(|(i, &o)| i != o) {
             let mut old: Vec<Option<Session>> = std::mem::take(&mut self.sessions).into_iter().map(Some).collect();
             self.sessions = ord.into_iter().filter_map(|i| old[i].take()).collect();
@@ -724,14 +757,147 @@ impl App {
         self.dirty = true;
     }
 
+    fn selected_id(&self) -> u32 {
+        self.sessions.get(self.selected).map_or(0, |s| s.id)
+    }
+
     /// Перестановка клавишами: только внутри своей группы.
     fn move_in_group(&mut self, to: usize) {
         let from = self.selected;
         match self.sessions.get(to) {
-            Some(t) if t.group_key() == self.sessions[from].group_key() => self.move_session(from, to),
-            Some(_) => self.toast("Это край группы — перетащите агента мышью или задайте группу (G)"),
+            Some(t) if t.group == self.sessions[from].group => self.move_session(from, to),
+            Some(_) => self.toast("Это край группы — перетащите агента мышью или переместите в группу (a)"),
             None => {}
         }
+    }
+
+    fn open_group_form(&mut self, orig: Option<usize>) {
+        let name = orig.and_then(|i| self.groups.get(i)).cloned().unwrap_or_default();
+        let checked = self.sessions.iter().map(|s| orig.is_some() && s.group.as_deref() == Some(name.as_str())).collect();
+        self.mode = Mode::GroupForm(GroupForm {
+            orig,
+            name: TextField::new(&name),
+            ids: self.sessions.iter().map(|s| s.id).collect(),
+            checked,
+            cursor: self.selected.min(self.sessions.len().saturating_sub(1)),
+            focus: 0,
+        });
+    }
+
+    /// Сохраняет диалог группы. Ошибка (пустое/повторное имя) — текст для тоста.
+    fn save_group_form(&mut self, f: &GroupForm) -> Result<(), String> {
+        let name = f.name.text().trim().to_string();
+        if name.is_empty() {
+            return Err("Введите имя группы".into());
+        }
+        if self.groups.iter().enumerate().any(|(i, g)| *g == name && Some(i) != f.orig) {
+            return Err(format!("Группа «{name}» уже есть"));
+        }
+        let keep = self.selected_id();
+        match f.orig.and_then(|i| self.groups.get(i).cloned().map(|old| (i, old))) {
+            Some((i, old)) => {
+                if old != name {
+                    for s in &mut self.sessions {
+                        if s.group.as_deref() == Some(old.as_str()) {
+                            s.group = Some(name.clone());
+                        }
+                    }
+                    if self.collapsed.remove(&old) {
+                        self.collapsed.insert(name.clone());
+                    }
+                    self.groups[i] = name.clone();
+                }
+            }
+            None => self.groups.push(name.clone()),
+        }
+        for (id, &on) in f.ids.iter().zip(&f.checked) {
+            if let Some(s) = self.sessions.iter_mut().find(|s| s.id == *id) {
+                if on {
+                    s.group = Some(name.clone());
+                } else if s.group.as_deref() == Some(name.as_str()) {
+                    s.group = None;
+                }
+            }
+        }
+        self.collapsed.remove(&name);
+        self.normalize_groups(keep);
+        let n = self.sessions.iter().filter(|s| s.group.as_deref() == Some(name.as_str())).count();
+        self.toast(format!("Группа «{name}»: агентов {n}"));
+        Ok(())
+    }
+
+    fn delete_group(&mut self, i: usize) {
+        let Some(name) = self.groups.get(i).cloned() else { return };
+        let keep = self.selected_id();
+        for s in &mut self.sessions {
+            if s.group.as_deref() == Some(name.as_str()) {
+                s.group = None;
+            }
+        }
+        self.groups.remove(i);
+        self.collapsed.remove(&name);
+        self.normalize_groups(keep);
+        self.toast(format!("Группа «{name}» удалена, агенты остались в списке"));
+    }
+
+    fn set_group(&mut self, group: Option<String>) {
+        let keep = self.selected_id();
+        if let Some(s) = self.sessions.get_mut(self.selected) {
+            s.group = group.clone();
+        }
+        if let Some(g) = &group {
+            self.collapsed.remove(g);
+        }
+        self.normalize_groups(keep);
+    }
+
+    fn move_group(&mut self, i: usize, down: bool) {
+        let j = if down { i + 1 } else { i.wrapping_sub(1) };
+        if i < self.groups.len() && j < self.groups.len() {
+            let keep = self.selected_id();
+            self.groups.swap(i, j);
+            self.normalize_groups(keep);
+        }
+    }
+
+    /// Свернуть/развернуть группу выбранного агента.
+    fn toggle_group(&mut self) {
+        match self.sessions.get(self.selected).and_then(|s| s.group.clone()) {
+            Some(g) => self.toggle_group_key(&g),
+            None => self.toast("Агент не в группе — переместить: a, создать группу: G"),
+        }
+    }
+
+    fn toggle_group_key(&mut self, key: &str) {
+        if !self.collapsed.remove(key) {
+            self.collapsed.insert(key.to_string());
+        }
+        self.dirty = true;
+    }
+
+    /// Меню «в какую группу переместить» выбранного агента.
+    fn group_menu(&self) -> Menu {
+        let cur = self.sessions.get(self.selected).and_then(|s| s.group.clone());
+        let mut items = vec![];
+        for (i, g) in self.groups.iter().enumerate() {
+            let mut it = MenuItem::new(&format!("В группу «{g}»"), Action::MoveToGroup(i), "");
+            it.enabled = cur.as_deref() != Some(g.as_str());
+            items.push(it);
+        }
+        if cur.is_some() {
+            items.push(MenuItem::new("Убрать из группы", Action::Ungroup, ""));
+        }
+        if !items.is_empty() {
+            items.push(MenuItem::sep());
+        }
+        items.push(MenuItem::new("Новая группа…", Action::NewGroup, "G"));
+        let (x, y) = self
+            .geo
+            .items
+            .iter()
+            .find(|(i, _)| *i == self.selected)
+            .map_or((self.geo.sidebar.x + 2, self.geo.sidebar.y + 3), |(_, r)| (r.x + 2, r.y + 1));
+        Menu::new(x, y, items, Rect::new(0, 0, self.term_size().0, self.term_size().1))
     }
 
     fn select_rel(&mut self, delta: isize) {
@@ -751,31 +917,6 @@ impl App {
             None => vis.iter().rev().copied().find(|&i| i < self.selected).unwrap_or(vis[vis.len() - 1]),
         };
         self.select(next);
-    }
-
-    /// Свернуть/развернуть группу выбранного агента.
-    fn toggle_group(&mut self) {
-        let Some(s) = self.sessions.get(self.selected) else { return };
-        let key = s.group_key();
-        let has_header = self
-            .sidebar_rows()
-            .iter()
-            .any(|r| matches!(r, crate::groups::Row::Header { key: k, .. } if *k == key));
-        if !has_header {
-            self.toast("Агент не в группе — задайте её через «Группа…» (G)");
-            return;
-        }
-        if !self.collapsed.remove(&key) {
-            self.collapsed.insert(key);
-        }
-        self.dirty = true;
-    }
-
-    fn toggle_group_key(&mut self, key: &str) {
-        if !self.collapsed.remove(key) {
-            self.collapsed.insert(key.to_string());
-        }
-        self.dirty = true;
     }
 
     fn select_next_attention(&mut self) {
@@ -827,7 +968,7 @@ impl App {
 
         // строки списка: заголовок группы — 1 строка, агент — 3 строки + пустая; 3 строки шапка
         let rows = self.sidebar_rows();
-        let rh = |r: &crate::groups::Row| if matches!(r, crate::groups::Row::Header { .. }) { 1u16 } else { 4 };
+        let rh = |r: &crate::groups::Row| if matches!(r, crate::groups::Row::Item(_)) { 4u16 } else { 1 };
         let avail = body.height.saturating_sub(3);
         let sel_row = rows
             .iter()
@@ -836,6 +977,7 @@ impl App {
                 crate::groups::Row::Header { first, count, collapsed, .. } => {
                     *collapsed && (*first..*first + *count).contains(&self.selected)
                 }
+                crate::groups::Row::Text(_) => false,
             })
             .unwrap_or(0);
         if rows.is_empty() {
@@ -848,6 +990,7 @@ impl App {
         }
         let mut items = vec![];
         let mut headers = vec![];
+        let mut texts = vec![];
         if sw > 0 {
             let mut y = sidebar.y + 3;
             let bottom = sidebar.y + body.height;
@@ -858,6 +1001,13 @@ impl App {
                             break;
                         }
                         headers.push((key.clone(), *first, *count, Rect::new(sidebar.x, y, sw - 1, 1)));
+                        y += 1;
+                    }
+                    crate::groups::Row::Text(t) => {
+                        if y + 1 > bottom {
+                            break;
+                        }
+                        texts.push((t.clone(), Rect::new(sidebar.x, y, sw - 1, 1)));
                         y += 1;
                     }
                     crate::groups::Row::Item(idx) => {
@@ -872,6 +1022,11 @@ impl App {
         }
         let new_btn = if sw > 12 {
             Rect::new(sidebar.x + sw - 1 - 9, sidebar.y, 9, 1)
+        } else {
+            Rect::default()
+        };
+        let group_btn = if sw >= 14 {
+            Rect::new(sidebar.x + 1, sidebar.y + 2, 10, 1)
         } else {
             Rect::default()
         };
@@ -928,7 +1083,7 @@ impl App {
             let max = s.max_scrollback();
             s.scroll = s.scroll.min(max);
         }
-        self.geo = Geometry { sidebar, main, status, panes, items, headers, new_btn, notif_btn };
+        self.geo = Geometry { sidebar, main, status, panes, items, headers, texts, group_btn, new_btn, notif_btn };
     }
 
     // ───────────── статусы и уведомления ─────────────
@@ -1192,9 +1347,22 @@ impl App {
             Action::GitRemoveWorktree if has => self.git_confirm(Action::GitRemoveWorktree),
             Action::MoveUp if has => self.move_in_group(self.selected.wrapping_sub(1)),
             Action::MoveDown if has => self.move_in_group(self.selected + 1),
-            Action::Group if has => {
-                let s = &self.sessions[self.selected];
-                self.mode = Mode::Group(TextField::new(s.group.as_deref().unwrap_or("")));
+            Action::NewGroup => self.open_group_form(None),
+            Action::Group if has => self.mode = Mode::Menu(self.group_menu()),
+            Action::Ungroup if has => self.set_group(None),
+            Action::MoveToGroup(i) if has => {
+                if let Some(g) = self.groups.get(i).cloned() {
+                    self.set_group(Some(g));
+                }
+            }
+            Action::EditGroup(i) if i < self.groups.len() => self.open_group_form(Some(i)),
+            Action::DeleteGroup(i) if i < self.groups.len() => self.mode = Mode::Confirm(Confirm::DeleteGroup(i)),
+            Action::MoveGroupUp(i) => self.move_group(i, false),
+            Action::MoveGroupDown(i) => self.move_group(i, true),
+            Action::ToggleGroupAt(i) => {
+                if let Some(g) = self.groups.get(i).cloned() {
+                    self.toggle_group_key(&g);
+                }
             }
             Action::ToggleGroup if has => self.toggle_group(),
             Action::Next => self.select_rel(1),
@@ -1249,7 +1417,8 @@ impl App {
                 ("К агенту, который ждёт ответа", Action::NextWaiting, "w"),
                 ("Закрыть выбранного агента", Action::Close, "x"),
                 ("Переименовать выбранного агента", Action::Rename, "r"),
-                ("Группа выбранного агента…", Action::Group, "G"),
+                ("Новая группа…", Action::NewGroup, "G"),
+                ("Переместить агента в группу…", Action::Group, "a"),
                 ("Свернуть/развернуть группу", Action::ToggleGroup, "o"),
                 ("Перезапустить завершившегося агента", Action::Restart, "R"),
                 ("Уведомления выбранного агента: вкл/выкл", Action::ToggleMute, "m"),
@@ -1318,8 +1487,10 @@ impl App {
             items.push(MenuItem::sep());
         }
         items.push(MenuItem::new("Переименовать…", Action::Rename, "r"));
-        items.push(MenuItem::new("Группа…", Action::Group, "G"));
-        items.push(MenuItem::new("Свернуть/развернуть группу", Action::ToggleGroup, "o"));
+        items.push(MenuItem::new("В группу…", Action::Group, "a"));
+        if s.group.is_some() {
+            items.push(MenuItem::new("Свернуть/развернуть группу", Action::ToggleGroup, "o"));
+        }
         if self.sessions.len() > 1 {
             let mut up = MenuItem::new("Выше в списке", Action::MoveUp, "K");
             up.enabled = idx > 0;
@@ -1372,6 +1543,7 @@ impl App {
         }
         items.extend([
             MenuItem::new("Новый агент…", Action::NewAgent, "n"),
+            MenuItem::new("Новая группа…", Action::NewGroup, "G"),
             MenuItem::new("Палитра команд", Action::Palette, "p"),
             MenuItem::sep(),
             MenuItem::new(if self.grid { "Один агент" } else { "Сетка" }, Action::ToggleGrid, "g"),
@@ -1430,7 +1602,8 @@ impl App {
                         2 => f.name.insert_str(text.trim()),
                         _ => {}
                     },
-                    Mode::Rename(t) | Mode::Group(t) => t.insert_str(text.trim()),
+                    Mode::Rename(t) => t.insert_str(text.trim()),
+                    Mode::GroupForm(f) if f.focus == 0 => f.name.insert_str(text.trim()),
                     Mode::Palette(p) => {
                         p.input.insert_str(text.trim());
                         p.sel = 0;
@@ -1461,7 +1634,7 @@ impl App {
             Mode::Nav(_) => self.key_nav(k),
             Mode::New(f) => self.key_new(f, k),
             Mode::Rename(t) => self.key_rename(t, k),
-            Mode::Group(t) => self.key_group(t, k),
+            Mode::GroupForm(f) => self.key_group_form(f, k),
             Mode::Confirm(c) => self.key_confirm(c, k),
             Mode::Menu(m) => self.key_menu(m, k),
             Mode::Palette(p) => self.key_palette(p, k),
@@ -2078,6 +2251,7 @@ impl App {
             match c {
                 Confirm::Approve(..) => {}
                 Confirm::Close(i) => self.close(i),
+                Confirm::DeleteGroup(i) => self.delete_group(i),
                 Confirm::Quit => self.quit = true,
                 Confirm::QuitStop => {
                     self.stop_on_quit = true;
@@ -2108,26 +2282,31 @@ impl App {
         }
     }
 
-    fn key_group(&mut self, mut t: TextField, k: KeyEvent) {
+    fn key_group_form(&mut self, mut f: GroupForm, k: KeyEvent) {
         match k.code {
-            KeyCode::Esc => {}
+            KeyCode::Esc => return,
             KeyCode::Enter => {
-                let name = t.text().trim().to_string();
-                if let Some(sess) = self.sessions.get_mut(self.selected) {
-                    let id = sess.id;
-                    sess.group = (!name.is_empty()).then_some(name);
-                    self.normalize_groups(id);
-                    if let Some(s) = self.sessions.get(self.selected) {
-                        let key = s.group_key();
-                        self.collapsed.remove(&key);
-                    }
+                match self.save_group_form(&f) {
+                    Ok(()) => return,
+                    Err(e) => self.toast(e),
                 }
             }
-            _ => {
-                t.handle_key(&k);
-                self.mode = Mode::Group(t);
+            KeyCode::Tab | KeyCode::BackTab => f.focus = 1 - f.focus,
+            KeyCode::Down if f.focus == 0 => f.focus = 1,
+            KeyCode::Up if f.focus == 1 && f.cursor == 0 => f.focus = 0,
+            KeyCode::Up if f.focus == 1 => f.cursor -= 1,
+            KeyCode::Down if f.focus == 1 => f.cursor = (f.cursor + 1).min(f.ids.len().saturating_sub(1)),
+            KeyCode::Char(' ') if f.focus == 1 => {
+                if let Some(c) = f.checked.get_mut(f.cursor) {
+                    *c = !*c;
+                }
             }
+            _ if f.focus == 0 => {
+                f.name.handle_key(&k);
+            }
+            _ => {}
         }
+        self.mode = Mode::GroupForm(f);
     }
 
     fn key_new(&mut self, mut f: NewForm, k: KeyEvent) {
@@ -2325,6 +2504,8 @@ impl App {
                 self.mode = Mode::Normal;
                 if in_rect(&self.geo.new_btn, x, y) {
                     self.open_new_form(None);
+                } else if in_rect(&self.geo.group_btn, x, y) {
+                    self.open_group_form(None);
                 } else if in_rect(&self.geo.notif_btn, x, y) {
                     self.run_action(Action::ToggleNotifications);
                 } else if let Some(key) = self.geo.headers.iter().find(|h| in_rect(&h.3, x, y)).map(|h| h.0.clone()) {
@@ -2370,21 +2551,22 @@ impl App {
             }
             MouseEventKind::Up(MouseButton::Left) if self.drag_item.is_some() => self.drag_item = None,
             MouseEventKind::Drag(MouseButton::Left) if self.drag_item.is_some() => {
-                if let (Some(from), Some(&(to, _))) =
-                    (self.drag_item, self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)))
-                {
-                    if from != to {
-                        // перетаскивание в другую группу переносит агента в неё
-                        let tkey = self.sessions[to].group_key();
-                        if self.sessions[from].group_key() != tkey {
-                            self.sessions[from].group = Some(tkey);
-                        }
-                        let id = self.sessions[from].id;
-                        self.move_session(from, to);
+                let Some(from) = self.drag_item.filter(|&f| f < self.sessions.len()) else { return };
+                let id = self.sessions[from].id;
+                // на заголовок группы — агент переходит в неё; на агента — в его группу (и на его место)
+                let over_header = self.geo.headers.iter().find(|h| in_rect(&h.3, x, y)).map(|h| h.0.clone());
+                let over_item = self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)).map(|(i, _)| *i);
+                if let Some(g) = over_header {
+                    if self.sessions[from].group.as_ref() != Some(&g) {
+                        self.sessions[from].group = Some(g);
                         self.normalize_groups(id);
-                        let cur = self.sessions.iter().position(|s| s.id == id).unwrap_or(to);
-                        self.drag_item = Some(cur);
+                        self.drag_item = self.sessions.iter().position(|s| s.id == id);
                     }
+                } else if let Some(to) = over_item.filter(|&t| t != from) {
+                    self.sessions[from].group = self.sessions[to].group.clone();
+                    self.move_session(from, to);
+                    self.normalize_groups(id);
+                    self.drag_item = self.sessions.iter().position(|s| s.id == id);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => self.mouse_up_left(x, y),
@@ -2536,7 +2718,22 @@ impl App {
     fn context_menu(&mut self, x: u16, y: u16) {
         let item = self.geo.items.iter().find(|(_, r)| in_rect(r, x, y)).map(|(i, _)| *i);
         let pane = self.pane_at(x, y).map(|p| p.idx);
-        let menu = if let Some(idx) = item {
+        let header = self.geo.headers.iter().find(|h| in_rect(&h.3, x, y)).map(|h| h.0.clone());
+        let menu = if let Some(gi) = header.and_then(|k| self.groups.iter().position(|g| *g == k)) {
+            let mut up = MenuItem::new("Выше", Action::MoveGroupUp(gi), "");
+            up.enabled = gi > 0;
+            let mut down = MenuItem::new("Ниже", Action::MoveGroupDown(gi), "");
+            down.enabled = gi + 1 < self.groups.len();
+            let items = vec![
+                MenuItem::new("Свернуть/развернуть", Action::ToggleGroupAt(gi), "o"),
+                MenuItem::new("Переименовать и состав…", Action::EditGroup(gi), ""),
+                up,
+                down,
+                MenuItem::sep(),
+                MenuItem::new("Удалить группу…", Action::DeleteGroup(gi), ""),
+            ];
+            Menu::new(x, y, items, Rect::new(0, 0, self.term_size().0, self.term_size().1))
+        } else if let Some(idx) = item {
             self.select(idx);
             self.session_menu(idx, true, x, y)
         } else if let Some(idx) = pane {
