@@ -197,7 +197,7 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
         buf.set_line(rect.x, rect.y, &Line::from(Span::styled(fit(t, w), Style::default().fg(th.dim))), w as u16);
     }
     if g.group_btn.width > 0 {
-        let btn = Line::from(Span::styled(" + группа ", Style::default().fg(th.on_color).bg(th.dim)));
+        let btn = Line::from(Span::styled(" + новая группа ", Style::default().fg(th.on_color).bg(th.dim)));
         buf.set_line(g.group_btn.x, g.group_btn.y, &btn, g.group_btn.width);
     }
 
@@ -847,43 +847,111 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// Области для кликов в модальном окне.
+#[derive(Default)]
+pub struct Hit {
+    pub popup: Rect,
+    /// Кнопки по порядку (первая — «да»).
+    pub buttons: Vec<Rect>,
+    /// Строки списка (варианты, агенты, команды): (номер, область).
+    pub rows: Vec<(usize, Rect)>,
+    /// Поле ввода.
+    pub field: Rect,
+}
+
+/// Ряд кнопок «клавиша название». Области — относительно начала строки (x от 0, y = 0).
+fn button_row(th: &Theme, items: &[(&str, &str)]) -> (Vec<Span<'static>>, Vec<Rect>) {
+    let mut spans = vec![Span::raw(" ")];
+    let mut rects = vec![];
+    let mut x = 1u16;
+    for (n, (key, label)) in items.iter().enumerate() {
+        let ks = if n == 0 {
+            Style::default().fg(th.on_color).bg(th.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(th.on_color).bg(th.dim)
+        };
+        let (k, l) = (format!(" {key} "), format!(" {label}"));
+        let w = (k.width() + l.width()) as u16;
+        spans.push(Span::styled(k, ks));
+        spans.push(Span::styled(l, Style::default().fg(th.text)));
+        rects.push(Rect::new(x, 0, w, 1));
+        spans.push(Span::raw("      "));
+        x += w + 6;
+    }
+    (spans, rects)
+}
+
+/// Переносит область из координат строки окна в экранные.
+fn at(inner: Rect, line: usize, r: Rect) -> Rect {
+    Rect::new(inner.x + r.x, inner.y + line as u16, r.width, 1)
+}
+
+fn inner_of(th: &Theme, r: Rect) -> Rect {
+    popup_block(th, "").inner(r)
+}
+
+pub fn input_hit(th: &Theme, area: Rect) -> Hit {
+    let r = centered(area, 50, 5);
+    let inner = inner_of(th, r);
+    let (_, rects) = button_row(th, &[("Enter", "Сохранить"), ("Esc", "Отмена")]);
+    Hit {
+        popup: r,
+        buttons: rects.into_iter().map(|b| at(inner, 2, b)).collect(),
+        field: Rect::new(inner.x, inner.y, inner.width, 1),
+        ..Default::default()
+    }
+}
+
 fn draw_input_popup(f: &mut Frame, title: &str, value: &TextField, th: &Theme) {
     let r = centered(f.area(), 50, 5);
     clear(f, r, th);
     let block = popup_block(th, title);
     let inner = block.inner(r);
     f.render_widget(block, r);
+    let (spans, _) = button_row(th, &[("Enter", "Сохранить"), ("Esc", "Отмена")]);
     f.render_widget(
-        Paragraph::new(vec![
-            Line::from(field_spans(value, true)),
-            Line::from(""),
-            Line::from(Span::styled("Enter — сохранить · Esc — отмена", Style::default().fg(th.dim))),
-        ]),
+        Paragraph::new(vec![Line::from(field_spans(value, true)), Line::from(""), Line::from(spans)]),
         inner,
     );
 }
 
+/// Размеры окна группы: (окно, внутренняя область, первый показанный агент, число строк списка).
+fn group_geom(th: &Theme, g: &crate::app::GroupForm, area: Rect) -> (Rect, Rect, usize, usize) {
+    let rows = g.ids.len().min(12);
+    let r = centered(area, 64, (4 + rows.max(1) + 3 + 2) as u16);
+    let first = g.cursor.saturating_sub(rows.saturating_sub(1)).min(g.ids.len().saturating_sub(rows));
+    (r, inner_of(th, r), first, rows)
+}
+
+pub fn group_hit(th: &Theme, g: &crate::app::GroupForm, area: Rect) -> Hit {
+    let (r, inner, first, rows) = group_geom(th, g, area);
+    let (_, rects) = button_row(th, &[("Enter", "Сохранить"), ("Esc", "Отмена")]);
+    let last = 4 + rows.max(1) + 2;
+    Hit {
+        popup: r,
+        buttons: rects.into_iter().map(|b| at(inner, last, b)).collect(),
+        rows: (first..first + rows).map(|n| (n, Rect::new(inner.x, inner.y + (4 + n - first) as u16, inner.width, 1))).collect(),
+        field: Rect::new(inner.x, inner.y, inner.width, 2),
+    }
+}
+
 fn draw_group_form(f: &mut Frame, app: &App, g: &crate::app::GroupForm) {
     let th = &app.theme;
-    let rows = g.ids.len().min(12) as u16;
-    let r = centered(f.area(), 64, 8 + rows.max(1));
+    let (r, inner, first, rows) = group_geom(th, g, f.area());
     clear(f, r, th);
     let title = if g.orig.is_some() { "Группа: имя и состав" } else { "Новая группа" };
     let block = popup_block(th, title);
-    let inner = block.inner(r);
     f.render_widget(block, r);
     let mut lines = vec![
         Line::from(vec![Span::styled("Имя: ", Style::default().fg(th.dim))]),
         Line::from(field_spans(&g.name, g.focus == 0)),
         Line::from(""),
-        Line::from(Span::styled("Агенты в группе:", Style::default().fg(th.dim))),
+        Line::from(Span::styled("Агенты в группе (клик или Пробел — отметить):", Style::default().fg(th.dim))),
     ];
     if g.ids.is_empty() {
         lines.push(Line::from(Span::styled("  агентов пока нет — группу можно создать пустой", Style::default().fg(th.dim))));
     }
-    // окно прокрутки вокруг курсора
-    let first = g.cursor.saturating_sub(rows.saturating_sub(1) as usize).min(g.ids.len().saturating_sub(rows as usize));
-    for (n, id) in g.ids.iter().enumerate().skip(first).take(rows as usize) {
+    for (n, id) in g.ids.iter().enumerate().skip(first).take(rows) {
         let Some(s) = app.sessions.iter().find(|s| s.id == *id) else { continue };
         let on = g.checked.get(n).copied().unwrap_or(false);
         let here = g.focus == 1 && n == g.cursor;
@@ -897,10 +965,9 @@ fn draw_group_form(f: &mut Frame, app: &App, g: &crate::app::GroupForm) {
         ]));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Tab — имя/список · Пробел — отметить · Enter — готово · Esc",
-        Style::default().fg(th.dim),
-    )));
+    lines.push(Line::from(Span::styled("Tab — имя/список · ↑/↓ — выбор", Style::default().fg(th.dim))));
+    let (spans, _) = button_row(th, &[("Enter", "Сохранить"), ("Esc", "Отмена")]);
+    lines.push(Line::from(spans));
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -944,13 +1011,29 @@ fn draw_menu(f: &mut Frame, m: &Menu, th: &Theme) {
     }
 }
 
+fn palette_geom(th: &Theme, p: &Palette, area: Rect) -> (Rect, Rect, usize, usize) {
+    let h = (p.matches().len().clamp(1, 12) + 4) as u16;
+    let r = centered(area, 64, h);
+    let inner = inner_of(th, r);
+    let rows = inner.height.saturating_sub(2) as usize;
+    (r, inner, p.sel.saturating_sub(rows.saturating_sub(1)), rows)
+}
+
+pub fn palette_hit(th: &Theme, p: &Palette, area: Rect) -> Hit {
+    let (r, inner, first, rows) = palette_geom(th, p, area);
+    let n = p.matches().len();
+    Hit {
+        popup: r,
+        rows: (first..n.min(first + rows)).map(|pos| (pos, Rect::new(inner.x, inner.y + 2 + (pos - first) as u16, inner.width, 1))).collect(),
+        ..Default::default()
+    }
+}
+
 fn draw_palette(f: &mut Frame, p: &Palette, th: &Theme) {
     let matches = p.matches();
-    let h = (matches.len().clamp(1, 12) + 4) as u16;
-    let r = centered(f.area(), 64, h);
+    let (r, inner, first, rows) = palette_geom(th, p, f.area());
     clear(f, r, th);
     let block = popup_block(th, "Команды");
-    let inner = block.inner(r);
     f.render_widget(block, r);
     let mut lines = vec![
         Line::from(
@@ -963,35 +1046,31 @@ fn draw_palette(f: &mut Frame, p: &Palette, th: &Theme) {
     if matches.is_empty() {
         lines.push(Line::from(Span::styled("ничего не найдено", Style::default().fg(th.dim))));
     }
-    let rows = inner.height.saturating_sub(2) as usize;
-    let first = p.sel.saturating_sub(rows.saturating_sub(1));
     for (pos, &i) in matches.iter().enumerate().skip(first).take(rows) {
         let e = &p.entries[i];
-        let sel = pos == p.sel;
-        let style = if sel {
-            Style::default().fg(th.on_color).bg(th.accent)
-        } else {
-            Style::default()
-        };
+        let style = if pos == p.sel { Style::default().fg(th.on_color).bg(th.accent) } else { Style::default() };
         let w = inner.width as usize;
         let gap = w.saturating_sub(e.title.width() + e.hint.width() + 2);
-        lines.push(Line::from(Span::styled(
-            format!(" {}{}{} ", e.title, " ".repeat(gap), e.hint),
-            style,
-        )));
+        lines.push(Line::from(Span::styled(format!(" {}{}{} ", e.title, " ".repeat(gap), e.hint), style)));
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Диалог разрешения: что просит агент и вопрос с вариантами — как на его экране.
-fn draw_approve(f: &mut Frame, app: &App, i: usize, note: &str, sel: Option<usize>) {
+struct ApproveGeom {
+    lines: Vec<Line<'static>>,
+    r: Rect,
+    inner: Rect,
+    hit: Hit,
+}
+
+fn approve_geom(app: &App, i: usize, note: &str, sel: Option<usize>, area: Rect) -> Option<ApproveGeom> {
     let th = &app.theme;
-    let Some(s) = app.sessions.get(i) else { return };
+    let s = app.sessions.get(i)?;
     let excerpt = s.prompt_excerpt();
-    let area = f.area();
     let w = area.width.saturating_sub(4).min(78).max(30);
     let text_w = w.saturating_sub(4) as usize;
-    let mut lines: Vec<Line> = vec![
+    let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(format!("{} · {} просит разрешение:", s.agent, s.name), Style::default().fg(th.subtext))),
         Line::from(Span::styled(fit(note, text_w), Style::default().add_modifier(Modifier::BOLD))),
         Line::from(""),
@@ -999,11 +1078,13 @@ fn draw_approve(f: &mut Frame, app: &App, i: usize, note: &str, sel: Option<usiz
     let max_rows = (area.height as usize).saturating_sub(9).clamp(3, 16);
     let skip = excerpt.len().saturating_sub(max_rows);
     let (opt_idx, _) = crate::session::option_lines(&excerpt);
+    let mut opt_lines: Vec<(usize, usize)> = vec![];
     for (k, l) in excerpt.iter().enumerate().skip(skip) {
         let opt = opt_idx.iter().position(|&x| x == k);
         let line = match opt {
             // варианты рисуем сами: выбор в диалоге и выбор агента могут отличаться
             Some(o) => {
+                opt_lines.push((o, lines.len()));
                 let text = l.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
                 let chosen = sel == Some(o);
                 let st = if chosen {
@@ -1018,18 +1099,26 @@ fn draw_approve(f: &mut Frame, app: &App, i: usize, note: &str, sel: Option<usiz
         lines.push(line);
     }
     lines.push(Line::from(""));
-    let foot = if opt_idx.is_empty() {
-        "y — разрешить · любая другая клавиша — отмена"
-    } else {
-        "↑/↓ или цифра — выбор · Enter / y — подтвердить · Esc — отмена"
-    };
-    lines.push(Line::from(Span::styled(foot, Style::default().fg(th.subtext))));
+    let yes = if opt_idx.is_empty() { ("y", "Разрешить") } else { ("Enter", "Подтвердить") };
+    let (spans, rects) = button_row(th, &[yes, ("Esc", "Отмена")]);
+    let btn_line = lines.len();
+    lines.push(Line::from(spans));
     let r = centered(area, w, lines.len() as u16 + 2);
-    clear(f, r, th);
-    let block = popup_block(th, "Подтверждение");
-    let inner = block.inner(r);
-    f.render_widget(block, r);
-    f.render_widget(Paragraph::new(lines), inner);
+    let inner = inner_of(th, r);
+    let hit = Hit {
+        popup: r,
+        buttons: rects.into_iter().map(|b| at(inner, btn_line, b)).collect(),
+        rows: opt_lines.into_iter().map(|(o, l)| (o, Rect::new(inner.x, inner.y + l as u16, inner.width, 1))).collect(),
+        ..Default::default()
+    };
+    Some(ApproveGeom { lines, r, inner, hit })
+}
+
+fn draw_approve(f: &mut Frame, app: &App, i: usize, note: &str, sel: Option<usize>) {
+    let Some(g) = approve_geom(app, i, note, sel, f.area()) else { return };
+    clear(f, g.r, &app.theme);
+    f.render_widget(popup_block(&app.theme, "Подтверждение"), g.r);
+    f.render_widget(Paragraph::new(g.lines), g.inner);
 }
 
 /// Содержимое окна подтверждения: заголовок, что именно, пояснение, предупреждение, название кнопки «да».
@@ -1112,11 +1201,7 @@ fn confirm_view(app: &App, c: &Confirm) -> ConfirmView {
     }
 }
 
-fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
-    if let Confirm::Approve(i, note, sel) = c {
-        return draw_approve(f, app, *i, note, *sel);
-    }
-    let th = &app.theme;
+fn confirm_geom(app: &App, c: &Confirm, area: Rect) -> (ConfirmView, Rect, Rect) {
     let cv = confirm_view(app, c);
     let foot = format!(" Enter  {}      Esc  Отмена ", cv.yes);
     let mut body_w = cv.subject.width().max(foot.width());
@@ -1124,11 +1209,30 @@ fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
         body_w = body_w.max(t.width() + 2);
     }
     let rows = 3 + cv.detail.is_some() as u16 + cv.warn.is_some() as u16 + 1;
-    let r = centered(f.area(), (body_w.max(34) as u16 + 6).min(f.area().width), rows + 2);
+    let r = centered(area, (body_w.max(34) as u16 + 6).min(area.width), rows + 2);
+    let inner = inner_of(&app.theme, r);
+    (cv, r, inner)
+}
+
+/// Области для кликов в окне подтверждения (в том числе окна разрешения запроса).
+pub fn confirm_hit(app: &App, c: &Confirm, area: Rect) -> Hit {
+    if let Confirm::Approve(i, note, sel) = c {
+        return approve_geom(app, *i, note, *sel, area).map(|g| g.hit).unwrap_or_default();
+    }
+    let (cv, r, inner) = confirm_geom(app, c, area);
+    let (_, rects) = button_row(&app.theme, &[("Enter", cv.yes), ("Esc", "Отмена")]);
+    let line = 2 + cv.detail.is_some() as usize + cv.warn.is_some() as usize;
+    Hit { popup: r, buttons: rects.into_iter().map(|b| at(inner, line, b)).collect(), ..Default::default() }
+}
+
+fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
+    if let Confirm::Approve(i, note, sel) = c {
+        return draw_approve(f, app, *i, note, *sel);
+    }
+    let th = &app.theme;
+    let (cv, r, inner) = confirm_geom(app, c, f.area());
     clear(f, r, th);
-    let block = popup_block(th, &cv.title);
-    let inner = block.inner(r);
-    f.render_widget(block, r);
+    f.render_widget(popup_block(th, &cv.title), r);
     let mut lines = vec![Line::from(Span::styled(
         format!(" {}", cv.subject),
         Style::default().fg(th.text).add_modifier(Modifier::BOLD),
@@ -1140,16 +1244,8 @@ fn draw_confirm(f: &mut Frame, app: &App, c: &Confirm) {
         lines.push(Line::from(Span::styled(format!(" ⚠ {w}"), Style::default().fg(th.yellow))));
     }
     lines.push(Line::from(""));
-    let key = Style::default().fg(th.on_color).bg(th.accent).add_modifier(Modifier::BOLD);
-    let txt = Style::default().fg(th.text);
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled(" Enter ", key),
-        Span::styled(format!(" {}", cv.yes), txt),
-        Span::raw("      "),
-        Span::styled(" Esc ", Style::default().fg(th.on_color).bg(th.dim)),
-        Span::styled(" Отмена", txt),
-    ]));
+    let (spans, _) = button_row(th, &[("Enter", cv.yes), ("Esc", "Отмена")]);
+    lines.push(Line::from(spans));
     f.render_widget(Paragraph::new(lines), inner);
 }
 

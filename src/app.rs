@@ -969,7 +969,7 @@ impl App {
         // строки списка: заголовок группы — 1 строка, агент — 3 строки + пустая; 3 строки шапка
         let rows = self.sidebar_rows();
         let rh = |r: &crate::groups::Row| if matches!(r, crate::groups::Row::Item(_)) { 4u16 } else { 1 };
-        let avail = body.height.saturating_sub(3);
+        let avail = body.height.saturating_sub(4);
         let sel_row = rows
             .iter()
             .position(|r| match r {
@@ -993,7 +993,7 @@ impl App {
         let mut texts = vec![];
         if sw > 0 {
             let mut y = sidebar.y + 3;
-            let bottom = sidebar.y + body.height;
+            let bottom = sidebar.y + body.height - 1; // нижняя строка — кнопка «+ новая группа»
             for r in rows.iter().skip(self.sidebar_first) {
                 match r {
                     crate::groups::Row::Header { key, first, count, .. } => {
@@ -1025,8 +1025,8 @@ impl App {
         } else {
             Rect::default()
         };
-        let group_btn = if sw >= 14 {
-            Rect::new(sidebar.x + 1, sidebar.y + 2, 10, 1)
+        let group_btn = if sw >= 14 && body.height >= 8 {
+            Rect::new(sidebar.x + 1, sidebar.y + body.height - 1, 16.min(sw - 2), 1)
         } else {
             Rect::default()
         };
@@ -2466,6 +2466,12 @@ impl App {
             }
             return;
         }
+        if matches!(self.mode, Mode::Confirm(_) | Mode::Rename(_) | Mode::Commit(_) | Mode::GroupForm(_) | Mode::Palette(_)) {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.mouse_modal(x, y);
+            }
+            return;
+        }
         if matches!(self.mode, Mode::Help) {
             if matches!(m.kind, MouseEventKind::Down(_)) {
                 self.mode = Mode::Normal;
@@ -2678,6 +2684,74 @@ impl App {
     }
 
     /// Клик в форме нового агента: выбор агента, переход между полями, галочка worktree.
+    /// Клики в небольших окнах: кнопки, строки списков, клик мимо окна — отмена.
+    fn mouse_modal(&mut self, x: u16, y: u16) {
+        let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let hit_in = |rs: &[Rect], n: usize| rs.get(n).map_or(false, |r| in_rect(r, x, y));
+        match std::mem::replace(&mut self.mode, Mode::Normal) {
+            Mode::Confirm(c) => {
+                let hit = ui::confirm_hit(self, &c, area);
+                if hit_in(&hit.buttons, 0) {
+                    self.key_confirm(c, enter);
+                } else if let Some(&(o, _)) = hit.rows.iter().find(|(_, r)| in_rect(r, x, y)) {
+                    if let Confirm::Approve(i, note, _) = c {
+                        self.mode = Mode::Confirm(Confirm::Approve(i, note, Some(o)));
+                    }
+                } else if in_rect(&hit.popup, x, y) && !hit_in(&hit.buttons, 1) {
+                    self.mode = Mode::Confirm(c);
+                }
+            }
+            Mode::Rename(t) => {
+                let hit = ui::input_hit(&self.theme, area);
+                if hit_in(&hit.buttons, 0) {
+                    self.key_rename(t, enter);
+                } else if in_rect(&hit.popup, x, y) && !hit_in(&hit.buttons, 1) {
+                    self.mode = Mode::Rename(t);
+                }
+            }
+            Mode::Commit(t) => {
+                let hit = ui::input_hit(&self.theme, area);
+                if hit_in(&hit.buttons, 0) {
+                    self.key_commit(t, enter);
+                } else if in_rect(&hit.popup, x, y) && !hit_in(&hit.buttons, 1) {
+                    self.mode = Mode::Commit(t);
+                }
+            }
+            Mode::GroupForm(mut f) => {
+                let hit = ui::group_hit(&self.theme, &f, area);
+                if hit_in(&hit.buttons, 0) {
+                    self.key_group_form(f, enter);
+                    return;
+                }
+                if hit_in(&hit.buttons, 1) || !in_rect(&hit.popup, x, y) {
+                    return;
+                }
+                if let Some(&(n, _)) = hit.rows.iter().find(|(_, r)| in_rect(r, x, y)) {
+                    f.focus = 1;
+                    f.cursor = n;
+                    if let Some(c) = f.checked.get_mut(n) {
+                        *c = !*c;
+                    }
+                } else if in_rect(&hit.field, x, y) {
+                    f.focus = 0;
+                }
+                self.mode = Mode::GroupForm(f);
+            }
+            Mode::Palette(mut p) => {
+                let hit = ui::palette_hit(&self.theme, &p, area);
+                if let Some(&(pos, _)) = hit.rows.iter().find(|(_, r)| in_rect(r, x, y)) {
+                    p.sel = pos;
+                    self.key_palette(p, enter);
+                } else if in_rect(&hit.popup, x, y) {
+                    self.mode = Mode::Palette(p);
+                }
+            }
+            other => self.mode = other,
+        }
+        self.dirty = true;
+    }
+
     fn mouse_new_form(&mut self, x: u16, y: u16) {
         let Mode::New(mut f) = std::mem::replace(&mut self.mode, Mode::Normal) else {
             return;
