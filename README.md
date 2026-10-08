@@ -20,7 +20,7 @@
 - **Агенты восстанавливаются** при следующем запуске (Claude Code продолжает диалог).
 - **12 цветовых схем** и окно настроек; **интеграции** с агентами для точных статусов (хуки).
 
-## Установка (macOS)
+## Установка (macOS и Linux)
 
 Не нужны ни brew, ни Rust, ни права администратора — только то, что есть в macOS. Выберите способ.
 
@@ -66,6 +66,28 @@ cd radar
 ```
 
 Первая сборка — около двух минут. Альтернатива: `cargo install --path .` (ставит в `~/.cargo/bin`).
+
+### Linux (Debian, СберОС и др.)
+
+Готовые сборки есть для `x86_64` и `aarch64` (glibc 2.35+: Debian 12/13, Ubuntu 22.04+). Установка и обновление те же:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash
+radar update          # дальше обновляйтесь так
+```
+
+Если GitHub с вашей сети недоступен — скачайте архив `radar-x86_64-unknown-linux-gnu.tar.gz` (или `aarch64`) на странице
+[Releases](https://github.com/off-art/radar/releases/latest), распакуйте и положите в `~/.local/bin`:
+
+```sh
+tar xzf radar-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ~/.local/bin && rm -f ~/.local/bin/radar && mv radar ~/.local/bin/
+```
+
+Для уведомлений и звука нужны `libnotify-bin` (`notify-send`) и `pulseaudio-utils` (`paplay`) или `alsa-utils` (`aplay`):
+`sudo apt install libnotify-bin pulseaudio-utils`. Проверка: `radar doctor`, `radar notify-test`. Копирование мышью идёт в системный
+буфер через `wl-copy` (Wayland) или `xclip`/`xsel` (X11), если они установлены, иначе через OSC 52 (терминал должен его поддерживать).
+Из исходников: `sudo apt install build-essential curl git`, затем Rust и `./install.sh`, как в способе 3.
 
 ### После установки
 

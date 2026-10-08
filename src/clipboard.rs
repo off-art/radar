@@ -1,4 +1,5 @@
-//! Копирование в системный буфер обмена: `pbcopy` на macOS, иначе — OSC 52 (терминал сам кладёт в буфер).
+//! Копирование в системный буфер обмена: `pbcopy` на macOS, `wl-copy`/`xclip`/`xsel` на Linux, иначе — OSC 52
+//! (терминал сам кладёт в буфер).
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -28,9 +29,21 @@ fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
+/// Linux: `wl-copy` (Wayland) или `xclip`/`xsel` (X11), если установлены; иначе остаётся OSC 52.
+fn linux_clipboard(text: &str) -> bool {
+    let has = |v: &str| std::env::var_os(v).map_or(false, |x| !x.is_empty());
+    if has("WAYLAND_DISPLAY") && pipe_to("wl-copy", &[], text) {
+        return true;
+    }
+    has("DISPLAY") && (pipe_to("xclip", &["-selection", "clipboard"], text) || pipe_to("xsel", &["--clipboard", "--input"], text))
+}
+
 /// Кладёт текст в буфер обмена. `true` — получилось (для OSC 52 это лишь «отправили терминалу»).
 pub fn copy(text: &str) -> bool {
     if cfg!(target_os = "macos") && pipe_to("pbcopy", &[], text) {
+        return true;
+    }
+    if cfg!(target_os = "linux") && linux_clipboard(text) {
         return true;
     }
     let mut out = std::io::stdout();

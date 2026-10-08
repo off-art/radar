@@ -300,7 +300,10 @@ pub fn preview(s: &Settings) {
 /// Для `radar doctor`: в каком состоянии уведомления.
 pub fn status_line() -> String {
     if !is_mac() {
-        return "notify-send (не macOS)".into();
+        let has = |c: &str| Command::new("sh").args(["-c", &format!("command -v {c}")]).stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(false, |s| s.success());
+        let n = if has("notify-send") { "notify-send ок" } else { "notify-send не найден (sudo apt install libnotify-bin)" };
+        let a = if has("paplay") || has("aplay") { "звук ок" } else { "звук: нет paplay/aplay (sudo apt install pulseaudio-utils)" };
+        return format!("{n}; {a}");
     }
     if app_ready() {
         format!("Radar.app готов ({})", app_path().display())
@@ -332,8 +335,14 @@ pub fn self_test(s: &Settings) {
     }
     std::thread::sleep(std::time::Duration::from_millis(1500));
     println!();
-    println!("Если уведомление не появилось: Системные настройки → Уведомления → «Radar» → разрешить.");
-    println!("(при первом показе macOS может спросить разрешение — нажмите «Разрешить»)");
+    if is_mac() {
+        println!("Если уведомление не появилось: Системные настройки → Уведомления → «Radar» → разрешить.");
+        println!("(при первом показе macOS может спросить разрешение — нажмите «Разрешить»)");
+    } else {
+        println!("Если уведомление не появилось: установите libnotify-bin (sudo apt install libnotify-bin)");
+        println!("и проверьте, что в окружении есть сеанс рабочего стола (DBUS_SESSION_BUS_ADDRESS).");
+        println!("Нет звука: sudo apt install pulseaudio-utils (paplay) или alsa-utils (aplay).");
+    }
 }
 
 #[cfg(test)]

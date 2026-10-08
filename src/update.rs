@@ -1,4 +1,4 @@
-//! `radar update`: самообновление из GitHub Releases (без внешних зависимостей: curl и tar есть в macOS).
+//! `radar update`: самообновление из GitHub Releases (без внешних зависимостей: нужны только curl и tar).
 
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
@@ -31,7 +31,9 @@ fn target() -> Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Ok("aarch64-apple-darwin"),
         ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
-        (os, arch) => bail!("обновление поддерживается только на macOS (у вас {os}/{arch})"),
+        ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
+        (os, arch) => bail!("обновление поддерживается на macOS и Linux (у вас {os}/{arch})"),
     }
 }
 
@@ -70,8 +72,10 @@ fn replace(exe: &Path, new: &Path) -> Result<()> {
         std::fs::copy(new, exe)?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(exe, std::fs::Permissions::from_mode(0o755))?;
-        let _ = Command::new("codesign").args(["--force", "--sign", "-"]).arg(exe).output();
-        let _ = Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(exe).output();
+        if cfg!(target_os = "macos") {
+            let _ = Command::new("codesign").args(["--force", "--sign", "-"]).arg(exe).output();
+            let _ = Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(exe).output();
+        }
         Ok(())
     };
     if let Err(e) = put() {

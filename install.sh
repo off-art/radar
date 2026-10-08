@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Установка Radar на macOS (Apple Silicon и Intel).
+# Установка Radar на macOS (Apple Silicon и Intel) и Linux (x86_64, aarch64).
 #
 #   curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash
 #
@@ -13,7 +13,7 @@ BIN_DIR="${RADAR_BIN_DIR:-$HOME/.local/bin}"
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = "Darwin" ] || say "Внимание: скрипт рассчитан на macOS, текущая система — $(uname -s)"
+case "$(uname -s)" in Darwin|Linux) ;; *) die "поддерживаются macOS и Linux, текущая система — $(uname -s)" ;; esac
 
 mkdir -p "$BIN_DIR"
 
@@ -44,10 +44,12 @@ if [ -n "$HERE" ] && [ -f "$HERE/Cargo.toml" ]; then
   put_binary "$HERE/target/release/radar"
 else
   # 2) Готовый бинарник из релиза (curl | bash)
-  case "$(uname -m)" in
-    arm64|aarch64) TARGET="aarch64-apple-darwin" ;;
-    x86_64)        TARGET="x86_64-apple-darwin" ;;
-    *) die "неподдерживаемая архитектура: $(uname -m)" ;;
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64|Darwin-aarch64) TARGET="aarch64-apple-darwin" ;;
+    Darwin-x86_64)               TARGET="x86_64-apple-darwin" ;;
+    Linux-x86_64)                TARGET="x86_64-unknown-linux-gnu" ;;
+    Linux-aarch64|Linux-arm64)   TARGET="aarch64-unknown-linux-gnu" ;;
+    *) die "неподдерживаемая система: $(uname -s) $(uname -m)" ;;
   esac
   URL="https://github.com/$REPO/releases/latest/download/radar-$TARGET.tar.gz"
   say "Скачиваю $URL"
@@ -59,7 +61,7 @@ else
 fi
 
 # Файл, скачанный браузером, помечается карантином macOS; через curl — нет, но на всякий случай.
-xattr -d com.apple.quarantine "$BIN_DIR/radar" 2>/dev/null || true
+[ "$(uname -s)" = "Darwin" ] && xattr -d com.apple.quarantine "$BIN_DIR/radar" 2>/dev/null || true
 
 say "Установлено: $BIN_DIR/radar"
 case ":$PATH:" in
