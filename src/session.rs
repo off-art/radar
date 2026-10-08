@@ -100,6 +100,22 @@ impl Write for FrameWriter {
     }
 }
 
+/// Шелл пользователя: $SHELL, если он существует, иначе zsh (macOS), bash или sh
+/// (в контейнерах и минимальных Linux $SHELL часто не задан).
+pub fn default_shell() -> String {
+    let ok = |p: &str| std::path::Path::new(p).is_file();
+    if let Ok(s) = std::env::var("SHELL") {
+        if ok(&s) {
+            return s;
+        }
+    }
+    ["/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"]
+        .into_iter()
+        .find(|p| ok(p))
+        .unwrap_or("/bin/sh")
+        .to_string()
+}
+
 pub fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -108,9 +124,9 @@ pub fn shq(s: &str) -> String {
 /// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полный путь.
 pub fn find_binary(bin: &str) -> Option<String> {
     if bin == "$SHELL" {
-        return Some(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
+        return Some(default_shell());
     }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let shell = default_shell();
     use std::os::unix::process::CommandExt;
     let mut cmd = std::process::Command::new(shell);
     // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
@@ -171,7 +187,7 @@ impl Session {
         resume: Option<&str>,
     ) -> Result<Session> {
         let (rows, cols) = size;
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let shell = default_shell();
         let args: Vec<String> = if def.kind == Kind::Shell {
             vec!["-l".into()]
         } else {
