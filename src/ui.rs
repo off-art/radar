@@ -585,7 +585,7 @@ fn draw_statusbar(f: &mut Frame, app: &App) {
         let pad = r.width as usize - used - right.width();
         spans.push(Span::raw(" ".repeat(pad)));
         if !badge.is_empty() {
-            spans.push(Span::styled(badge.clone(), Style::default().fg(th.on_color).bg(amber)));
+            spans.push(Span::styled(badge, Style::default().fg(th.on_color).bg(amber)));
         }
         let st = if app.notifications { Style::default().fg(th.subtext) } else { Style::default().fg(th.red) };
         spans.push(Span::styled(right, st));
@@ -617,7 +617,7 @@ fn field_spans(t: &TextField, active: bool) -> Vec<Span<'static>> {
     let cur = Style::default().add_modifier(Modifier::REVERSED);
     vec![
         Span::raw(before),
-        Span::styled(at.map(|c| c.to_string()).unwrap_or_else(|| " ".into()), cur),
+        Span::styled(at.map_or_else(|| " ".into(), |c| c.to_string()), cur),
         Span::raw(after),
     ]
 }
@@ -758,7 +758,7 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
             // серый «хвост» продолжает ввод; курсор стоит на его первом символе
             let tail: Vec<char> = s.chars().skip(dir_text.chars().count()).collect();
             let dim = Style::default().fg(th.dim);
-            dir_line.push(Span::raw(dir_text.clone()));
+            dir_line.push(Span::raw(dir_text));
             dir_line.push(Span::styled(tail[0].to_string(), dim.add_modifier(Modifier::REVERSED)));
             dir_line.push(Span::styled(format!("{}  (→)", tail[1..].iter().collect::<String>()), dim));
         }
@@ -1114,7 +1114,7 @@ fn confirm_view(app: &App, c: &Confirm) -> ConfirmView {
     let session = |i: usize| app.sessions.get(i);
     let name = |i: usize| session(i).map(|s| format!("{} · {}", s.name, s.agent)).unwrap_or_default();
     let branch = |i: usize| session(i).and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
-    let dirty = |i: usize| session(i).and_then(|s| s.git.as_ref()).is_some_and(|g| g.dirty());
+    let dirty = |i: usize| session(i).and_then(|s| s.git.as_ref()).is_some_and(super::git::Info::dirty);
     let running = app.sessions.iter().filter(|s| s.is_running()).count();
     match c {
         Confirm::Close(i) => {

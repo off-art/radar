@@ -82,7 +82,7 @@ pub fn run_dir() -> PathBuf {
 
 /// Новый путь сокета хозяина.
 pub fn new_sock_path(id: u32) -> PathBuf {
-    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
     run_dir().join(format!("{ms}-{id}.sock"))
 }
 
@@ -184,7 +184,7 @@ pub fn run_host() -> Result<()> {
     {
         let sh = sh.clone();
         std::thread::spawn(move || {
-            let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
+            let code = child.wait().map_or(-1, |s| s.exit_code() as i32);
             let mut client = sh.client.lock().unwrap();
             *sh.exit.lock().unwrap() = Some(code);
             if let Some(c) = client.as_mut() {

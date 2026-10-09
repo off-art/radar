@@ -68,7 +68,7 @@ pub fn resolve(items: &[(u32, String)], target: &str) -> Result<u32, String> {
 
 /// Сокет работающего Radar: из `RADAR_SOCK` или самый свежий живой `radar-*.sock`.
 pub fn find_socket(explicit: Option<String>) -> Result<PathBuf> {
-    if let Some(p) = explicit.clone() {
+    if let Some(p) = explicit {
         return Ok(PathBuf::from(p));
     }
     // RADAR_SOCK внутри агента мог остаться от закрытого окна — берём, только если там кто-то слушает

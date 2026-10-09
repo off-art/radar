@@ -80,7 +80,7 @@ pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
         "gigacode" => home.join(".gigacode/settings.json"),
         "gemini" => home.join(".gemini/settings.json"),
         "codex" => {
-            std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex")).join("hooks.json")
+            std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from).join("hooks.json")
         }
         "opencode" => home.join(".config/opencode/plugins/radar.js"),
         _ => return None,
@@ -114,7 +114,7 @@ fn state_in(id: &str, home: &Path) -> State {
     };
     let on = match sp.method {
         Method::OpenCodePlugin => text.contains(PLUGIN_MARK),
-        Method::JsonHooks(_) => serde_json::from_str::<Value>(&text).map(|v| has_radar_hooks(&v)).unwrap_or(false),
+        Method::JsonHooks(_) => serde_json::from_str::<Value>(&text).is_ok_and(|v| has_radar_hooks(&v)),
     };
     if on {
         State::Installed
@@ -173,7 +173,7 @@ fn uninstall_in(id: &str, home: &Path) -> Result<()> {
             let mut root = read_json(&path)?;
             remove_hooks(&mut root);
             // файл создан нами и теперь пуст — убираем его целиком
-            if root.as_object().map(|o| o.is_empty()).unwrap_or(false) && !backup_path(&path).exists() {
+            if root.as_object().is_some_and(serde_json::Map::is_empty) && !backup_path(&path).exists() {
                 std::fs::remove_file(&path)?;
             } else {
                 std::fs::write(&path, serde_json::to_vec_pretty(&root)?)?;
@@ -214,15 +214,13 @@ fn read_json(path: &Path) -> Result<Value> {
 fn is_radar_group(g: &Value) -> bool {
     g.get("hooks")
         .and_then(|h| h.as_array())
-        .map(|h| h.iter().any(|x| x.get("name").and_then(|n| n.as_str()) == Some(MARK)))
-        .unwrap_or(false)
+        .is_some_and(|h| h.iter().any(|x| x.get("name").and_then(|n| n.as_str()) == Some(MARK)))
 }
 
 fn has_radar_hooks(root: &Value) -> bool {
     root.get("hooks")
         .and_then(|h| h.as_object())
-        .map(|h| h.values().any(|v| v.as_array().map(|a| a.iter().any(is_radar_group)).unwrap_or(false)))
-        .unwrap_or(false)
+        .is_some_and(|h| h.values().any(|v| v.as_array().is_some_and(|a| a.iter().any(is_radar_group))))
 }
 
 fn shq(s: &str) -> String {
@@ -252,7 +250,7 @@ fn remove_hooks(root: &mut Value) {
             a.retain(|g| !is_radar_group(g));
         }
     }
-    hooks.retain(|_, v| v.as_array().map(|a| !a.is_empty()).unwrap_or(true));
+    hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
     if hooks.is_empty() {
         obj.remove("hooks");
     }

@@ -115,7 +115,7 @@ fn sound_file(kind: Sound, s: &Settings) -> Option<PathBuf> {
     };
     let dir = config_dir().join("sounds");
     let path = dir.join(name);
-    let ok = std::fs::metadata(&path).map(|m| m.len() == data.len() as u64).unwrap_or(false);
+    let ok = std::fs::metadata(&path).is_ok_and(|m| m.len() == data.len() as u64);
     if !ok {
         std::fs::create_dir_all(&dir).ok()?;
         std::fs::write(&path, data).ok()?;
@@ -147,15 +147,14 @@ fn stamp() -> String {
 
 fn app_ready() -> bool {
     app_path().join("Contents").exists()
-        && std::fs::read_to_string(config_dir().join("notifier.stamp")).map(|s| s == stamp()).unwrap_or(false)
+        && std::fs::read_to_string(config_dir().join("notifier.stamp")).is_ok_and(|s| s == stamp())
 }
 
 fn plist_set(plist: &Path, key: &str, kind: &str, value: &str) {
     let pb = "/usr/libexec/PlistBuddy";
     let target = plist.to_string_lossy().to_string();
     if quiet(Command::new(pb).args(["-c", &format!("Set :{key} {value}"), &target]))
-        .map(|s| !s.success())
-        .unwrap_or(true)
+        .map_or(true, |s| !s.success())
     {
         let _ = quiet(Command::new(pb).args(["-c", &format!("Add :{key} {kind} {value}"), &target]));
     }
@@ -238,13 +237,13 @@ fn send_via_helper(title: &str, body: &str) -> bool {
     if std::fs::create_dir_all(&q).is_err() {
         return false;
     }
-    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let file = q.join(format!("{stamp:032}.json"));
     let json = format!("{{\"title\":{},\"body\":{}}}", json_escape(title), json_escape(body));
     if std::fs::write(&file, json).is_err() {
         return false;
     }
-    let ok = quiet(Command::new("open").args(["-g", "-j", "-a"]).arg(app_path())).map(|s| s.success()).unwrap_or(false);
+    let ok = quiet(Command::new("open").args(["-g", "-j", "-a"]).arg(app_path())).is_ok_and(|s| s.success());
     if !ok {
         let _ = std::fs::remove_file(file);
     }

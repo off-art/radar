@@ -48,7 +48,7 @@ impl View {
     }
 
     pub fn max_scroll(&self, height: usize) -> usize {
-        self.file().map(|f| f.lines.len().saturating_sub(height)).unwrap_or(0)
+        self.file().map_or(0, |f| f.lines.len().saturating_sub(height))
     }
 
     pub fn select(&mut self, i: usize) {
@@ -81,7 +81,7 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
     for raw in text.lines() {
         if let Some(rest) = raw.strip_prefix("diff --git ") {
             // «a/путь b/путь»; берём вторую половину
-            let path = rest.rsplit_once(" b/").map(|(_, p)| p.to_string()).unwrap_or_else(|| rest.to_string());
+            let path = rest.rsplit_once(" b/").map_or_else(|| rest.to_string(), |(_, p)| p.to_string());
             files.push(FileDiff { path, status: 'M', added: 0, removed: 0, lines: vec![] });
             in_hunk = false;
             continue;

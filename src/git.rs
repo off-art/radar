@@ -75,7 +75,7 @@ pub fn run_timeout(dir: &Path, args: &[&str], limit: Duration) -> Option<String>
     });
     match rx.recv_timeout(limit) {
         Ok(buf) => {
-            let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+            let ok = child.wait().is_ok_and(|s| s.success());
             ok.then(|| String::from_utf8_lossy(&buf).into_owned())
         }
         Err(_) => {
@@ -131,7 +131,7 @@ pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String
             }
         }
     }
-    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    let ok = child.wait().is_ok_and(|s| s.success());
     let so = String::from_utf8_lossy(&so).trim().to_string();
     let se = String::from_utf8_lossy(&se).trim().to_string();
     if ok {

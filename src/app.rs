@@ -238,9 +238,9 @@ fn make_worktree(dir: &Path, agent_id: &str) -> Result<PathBuf> {
     let top = PathBuf::from(
         run_git(dir, &["rev-parse", "--show-toplevel"]).map_err(|_| anyhow!("папка не в git-репозитории"))?,
     );
-    let repo = top.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "repo".into());
+    let repo = top.file_name().map_or_else(|| "repo".into(), |s| s.to_string_lossy().to_string());
     let stamp =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() % 100_000).unwrap_or(0);
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
     let slug = format!("{agent_id}-{stamp}");
     let base = dirs::home_dir().unwrap_or_default().join(".radar").join("worktrees");
     std::fs::create_dir_all(&base)?;
@@ -389,7 +389,7 @@ impl App {
             (dir, None)
         };
         let base = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
-            cwd.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| def.name.clone())
+            cwd.file_name().map_or_else(|| def.name.clone(), |s| s.to_string_lossy().to_string())
         });
         // одинаковые имена (несколько агентов в одной папке) различаем номером
         let mut name = base.clone();
@@ -1171,14 +1171,14 @@ impl App {
     // ───────────── действия ─────────────
 
     fn page(&self) -> usize {
-        (self.geo.panes.first().map(|p| p.inner.height).unwrap_or(20) / 2).max(3) as usize
+        (self.geo.panes.first().map_or(20, |p| p.inner.height) / 2).max(3) as usize
     }
 
     fn open_new_form(&mut self, agent: Option<usize>) {
-        let dir = self.sessions.get(self.selected).map(|s| s.cwd.clone()).unwrap_or_else(|| self.start_dir.clone());
+        let dir = self.sessions.get(self.selected).map_or_else(|| self.start_dir.clone(), |s| s.cwd.clone());
         let last = self.cfg.agents.len().saturating_sub(1);
         let first_visible = self.visible_agents(false).first().copied().unwrap_or(0);
-        let chosen = agent.map(|i| i.min(last)).unwrap_or(first_visible);
+        let chosen = agent.map_or(first_visible, |i| i.min(last));
         // если выбранного агента нет в системе, показываем всех, чтобы выбор был виден
         let show_all = !self.visible_agents(false).contains(&chosen);
         self.mode = Mode::New(NewForm {
@@ -1435,7 +1435,7 @@ impl App {
                 action: Action::ApproveAt(i),
             });
         }
-        if self.sessions.get(self.selected).map(|s| s.git.is_some()).unwrap_or(false) {
+        if self.sessions.get(self.selected).is_some_and(|s| s.git.is_some()) {
             e.push(PaletteEntry {
                 title: "Git: закоммитить изменения агента".into(),
                 hint: String::new(),
@@ -1772,7 +1772,7 @@ impl App {
         }
         match row {
             0 => {
-                let names: Vec<String> = crate::theme::names().iter().map(|s| s.to_string()).collect();
+                let names: Vec<String> = crate::theme::names().iter().map(std::string::ToString::to_string).collect();
                 self.cfg.theme_name = cycle(&names, &self.cfg.theme_name, dir);
                 self.theme = self.cfg.theme();
             }
@@ -1782,7 +1782,7 @@ impl App {
             }
             2 => self.cfg.sound = !self.cfg.sound,
             3 => {
-                let names: Vec<String> = notify::theme_names().iter().map(|s| s.to_string()).collect();
+                let names: Vec<String> = notify::theme_names().iter().map(std::string::ToString::to_string).collect();
                 self.cfg.sound_theme = cycle(&names, &self.cfg.sound_theme, dir);
                 notify::preview(&self.notify_settings());
             }
@@ -2172,7 +2172,7 @@ impl App {
             return Err("Агент ничего не просит: он не в статусе «ждёт ответа»".into());
         }
         let enabled =
-            self.cfg.agents.iter().find(|d| d.name == s.agent).map(|d| !d.approve.is_empty()).unwrap_or(false);
+            self.cfg.agents.iter().find(|d| d.name == s.agent).is_some_and(|d| !d.approve.is_empty());
         if !enabled {
             return Err(format!("Для «{}» подтверждение из списка не включено (approve в config.toml)", s.agent));
         }
@@ -2250,7 +2250,7 @@ impl App {
     fn key_confirm(&mut self, c: Confirm, k: KeyEvent) {
         if let Confirm::Approve(i, note, sel) = c {
             let n =
-                self.sessions.get(i).map(|s| crate::session::option_lines(&s.prompt_excerpt()).0.len()).unwrap_or(0);
+                self.sessions.get(i).map_or(0, |s| crate::session::option_lines(&s.prompt_excerpt()).0.len());
             let keep =
                 |app: &mut Self, sel: Option<usize>| app.mode = Mode::Confirm(Confirm::Approve(i, note.clone(), sel));
             match k.code {
@@ -2635,7 +2635,7 @@ impl App {
             return;
         }
         let head = Self::pane_cell(inner, x, y);
-        let anchor = self.sel.map(|s| s.anchor).unwrap_or_else(|| Self::pane_cell(inner, px, py));
+        let anchor = self.sel.map_or_else(|| Self::pane_cell(inner, px, py), |s| s.anchor);
         self.sel = Some(Selection { idx, anchor, head });
         self.dirty = true;
     }
@@ -2675,7 +2675,7 @@ impl App {
         let (_, cols) = p.screen().size();
         let text = p.screen().contents_between(r0, c0.min(cols), r1, (c1 + 1).min(cols));
         p.screen_mut().set_scrollback(0);
-        text.lines().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n").trim_end().to_string()
+        text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n").trim_end().to_string()
     }
 
     /// Колесо: агенту с включённой мышью — событие; полноэкранным программам (less, vim, htop) —

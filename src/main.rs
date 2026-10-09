@@ -81,7 +81,7 @@ fn integration_cmd(args: &[String]) -> Result<()> {
     if matches!(act, Some("install") | Some("uninstall")) {
         let targets = &args[1..];
         let list: Vec<String> = if targets.iter().any(|t| t == "all") {
-            integrations::installable().iter().map(|s| s.to_string()).collect()
+            integrations::installable().iter().map(std::string::ToString::to_string).collect()
         } else if targets.is_empty() {
             eprintln!("radar integration {} <агент ...|all>", act.unwrap());
             std::process::exit(2);
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("hook") => {
-            hook::run_client(args.get(1).map(String::as_str).unwrap_or(""));
+            hook::run_client(args.get(1).map_or("", String::as_str));
             return Ok(());
         }
         Some("-h") | Some("--help") | Some("help") => {

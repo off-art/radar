@@ -122,7 +122,7 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn config_path() -> PathBuf {
-    std::env::var_os("RADAR_CONFIG").map(PathBuf::from).unwrap_or_else(|| config_dir().join("config.toml"))
+    std::env::var_os("RADAR_CONFIG").map_or_else(|| config_dir().join("config.toml"), PathBuf::from)
 }
 
 fn state_path() -> PathBuf {

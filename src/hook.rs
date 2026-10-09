@@ -50,7 +50,7 @@ pub fn start_server(path: &PathBuf, tx: Sender<Msg>) -> Result<()> {
                     let _ = stream.write_all(reply.to_string().as_bytes());
                     return;
                 }
-                let session = v.get("session").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
+                let session = v.get("session").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
                 let event = v.get("event").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let payload = v.get("payload").cloned().unwrap_or(Value::Null);
                 let _ = tx.send(Msg::Hook { session, event, payload });
@@ -87,7 +87,7 @@ fn log_event(event: &str, input: &str) {
     if std::env::var_os("RADAR_HOOK_LOG").is_none() {
         return;
     }
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let session = std::env::var("RADAR_SESSION").unwrap_or_else(|_| "-".into());
     let body: String = input.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
     let line = format!("{secs} session={session} event={event} payload={body}\n");

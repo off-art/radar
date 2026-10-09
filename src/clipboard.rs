@@ -29,7 +29,7 @@ fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
             return false;
         }
     }
-    child.wait().map(|s| s.success()).unwrap_or(false)
+    child.wait().is_ok_and(|s| s.success())
 }
 
 /// Linux: `wl-copy` (Wayland) или `xclip`/`xsel` (X11), если установлены; иначе остаётся OSC 52.
