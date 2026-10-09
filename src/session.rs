@@ -47,6 +47,10 @@ pub struct SpawnCtx {
     pub claude_settings: Option<PathBuf>,
 }
 
+/// Сколько строк истории прокрутки хранит окно на каждого агента.
+/// Память: около 15 МБ на агента при ширине 100 колонок (и ~29 МБ при 200) на полностью заполненной истории.
+const SCROLLBACK_LINES: usize = 5000;
+
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
 pub struct Session {
@@ -171,7 +175,7 @@ pub fn feed(parser: &mut vt100::Parser, data: &[u8]) {
         parser.process(&rest[..end]);
         let (rows, cols) = parser.screen().size();
         let screen = parser.screen().state_formatted();
-        *parser = vt100::Parser::new(rows, cols, 5000);
+        *parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
         parser.process(&screen);
         rest = &rest[end..];
     }
@@ -265,7 +269,7 @@ impl Session {
     pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Result<Session> {
         let id = meta.id;
         let (rows, cols) = (meta.rows, meta.cols);
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 5000)));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, SCROLLBACK_LINES)));
         let conn = Arc::new(Mutex::new(stream.try_clone().context("клонирование сокета")?));
         let writer: Writer = Arc::new(Mutex::new(Box::new(FrameWriter(conn.clone()))));
         {
