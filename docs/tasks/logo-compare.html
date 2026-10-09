@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar: эскизы логотипа</title>
+<style>
+  body { margin: 0; font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; background: #f1efe9; color: #1b1e24; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 20px 60px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 28px; color: #647084; }
+  .row { display: grid; grid-template-columns: 200px 1fr 1fr; gap: 14px; align-items: stretch; margin-bottom: 14px; }
+  .label b { display: block; font-size: 17px; }
+  .label span { color: #647084; font-size: 13.5px; }
+  .pane { border-radius: 14px; padding: 18px; display: flex; align-items: center; gap: 22px; border: 1px solid #ddd8cb; }
+  .dark { background: #0e1116; border-color: #252c38; }
+  .light { background: #ffffff; }
+  .s128 { height: 96px; } .s32 { height: 32px; } .s16 { height: 16px; }
+  .wide .s128 { height: 52px; } .wide .s32 { height: 24px; } .wide .s16 { height: 16px; }
+  .pane { min-width: 0; overflow: hidden; }
+  .notes { margin-top: 28px; padding: 18px 20px; background: #fff; border: 1px solid #ddd8cb; border-radius: 14px; }
+  .notes h2 { margin: 0 0 8px; font-size: 17px; }
+  .notes li { margin: 4px 0; }
+  @media (max-width: 760px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Radar: эскизы логотипа</h1>
+  <p class="sub">Четыре направления на тёмном и светлом фоне в трёх размерах (крупно, 32 px, 16 px). Цвета условные.</p>
+
+  <div class="row">
+    <div class="label"><b>A. Радар с лучом</b><span>Прямая отсылка к названию. Узнаваемо, но похоже на десятки «радаров».</span></div>
+    <div class="pane dark"><img class="s128" src="logo-sketches/a-sweep.svg" alt=""><img class="s32" src="logo-sketches/a-sweep.svg" alt=""><img class="s16" src="logo-sketches/a-sweep.svg" alt=""></div>
+    <div class="pane light"><img class="s128" src="logo-sketches/a-sweep.svg" alt=""><img class="s32" src="logo-sketches/a-sweep.svg" alt=""><img class="s16" src="logo-sketches/a-sweep.svg" alt=""></div>
+  </div>
+
+  <div class="row">
+    <div class="label"><b>B. Точки-агенты</b><span>Три статуса продукта: работает, ждёт, готов. Объясняет суть без слов.</span></div>
+    <div class="pane dark"><img class="s128" src="logo-sketches/b-dots.svg" alt=""><img class="s32" src="logo-sketches/b-dots.svg" alt=""><img class="s16" src="logo-sketches/b-dots.svg" alt=""></div>
+    <div class="pane light"><img class="s128" src="logo-sketches/b-dots.svg" alt=""><img class="s32" src="logo-sketches/b-dots.svg" alt=""><img class="s16" src="logo-sketches/b-dots.svg" alt=""></div>
+  </div>
+
+  <div class="row">
+    <div class="label"><b>C. Вордмарк radar_</b><span>Терминальный характер, курсор как акцент. Нужен как отдельная иконка-монограмма «r_».</span></div>
+    <div class="pane dark wide"><img class="s128" src="logo-sketches/c-wordmark.svg" alt=""><img class="s32" src="logo-sketches/c-wordmark.svg" alt=""><img class="s16" src="logo-sketches/c-wordmark.svg" alt=""></div>
+    <div class="pane light wide"><img class="s128" src="logo-sketches/c-wordmark.svg" alt=""><img class="s32" src="logo-sketches/c-wordmark.svg" alt=""><img class="s16" src="logo-sketches/c-wordmark.svg" alt=""></div>
+  </div>
+
+  <div class="row">
+    <div class="label"><b>D. Скобки [●]</b><span>Минималистично, хорошо держится в 16 px. Намекает на «один живой индикатор в рамке».</span></div>
+    <div class="pane dark"><img class="s128" src="logo-sketches/d-brackets.svg" alt=""><img class="s32" src="logo-sketches/d-brackets.svg" alt=""><img class="s16" src="logo-sketches/d-brackets.svg" alt=""></div>
+    <div class="pane light"><img class="s128" src="logo-sketches/d-brackets.svg" alt=""><img class="s32" src="logo-sketches/d-brackets.svg" alt=""><img class="s16" src="logo-sketches/d-brackets.svg" alt=""></div>
+  </div>
+
+  <div class="notes">
+    <h2>Что смотреть</h2>
+    <ul>
+      <li>Читается ли знак в 16 px (favicon, меню macOS)?</li>
+      <li>Не теряется ли серая часть на светлом фоне?</li>
+      <li>Как знак будет выглядеть иконкой приложения 1024×1024 со скруглением (для <code>Radar.app</code>)?</li>
+      <li>Нужны ли связка «знак + вордмарк» и монохромная версия?</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>
