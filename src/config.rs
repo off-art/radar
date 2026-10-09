@@ -28,6 +28,13 @@ pub struct AgentDef {
     pub approve: Vec<u8>,
 }
 
+impl AgentDef {
+    /// Имя исполняемого файла: первое слово команды.
+    pub fn bin(&self) -> &str {
+        self.command.split_whitespace().next().unwrap_or("")
+    }
+}
+
 /// Ответ «разрешить» по умолчанию: включён для Claude Code и Qwen Code (Enter на пункте «Yes», проверено),
 /// остальным агентам включается в config.toml (`approve = "y"`).
 fn default_approve(command: &str) -> Vec<u8> {

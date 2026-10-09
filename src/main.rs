@@ -60,12 +60,11 @@ fn doctor() -> Result<()> {
     println!("Radar {}", env!("CARGO_PKG_VERSION"));
     println!("Конфиг: {}", config::config_path().display());
     println!();
-    for a in &cfg.agents {
-        let bin = a.command.split_whitespace().next().unwrap_or("");
-        let found = session::find_binary(bin);
+    let bins: Vec<&str> = cfg.agents.iter().map(config::AgentDef::bin).collect();
+    for (a, found) in cfg.agents.iter().zip(session::find_binaries(&bins)) {
         match found {
             Some(p) => println!("  ✓ {:<14} {}", a.name, p),
-            None => println!("  ✗ {:<14} не найден ({})", a.name, bin),
+            None => println!("  ✗ {:<14} не найден ({})", a.name, a.bin()),
         }
     }
     println!();

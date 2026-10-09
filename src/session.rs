@@ -119,35 +119,45 @@ pub fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// Ищет команду так, как её найдёт запускаемый агент: через login+interactive shell
-/// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полный путь.
-pub fn find_binary(bin: &str) -> Option<String> {
-    if bin == "$SHELL" {
-        return Some(default_shell());
+/// Ищет команды так, как их найдёт запускаемый агент: через login+interactive shell
+/// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полные пути в порядке `bins`.
+/// Один шелл на все команды: каждый такой шелл читает rc-файлы пользователя, а они бывают тяжёлыми.
+pub fn find_binaries(bins: &[&str]) -> Vec<Option<String>> {
+    let names: Vec<&str> = bins.iter().copied().filter(|b| *b != "$SHELL").collect();
+    let mut paths: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if !names.is_empty() {
+        let list: Vec<String> = names.iter().map(|b| shq(b)).collect();
+        // «имя<TAB>путь» на каждую команду; пусто, если не найдена
+        let script =
+            format!("for b in {}; do printf '%s\\t%s\\n' \"$b\" \"$(command -v \"$b\")\"; done", list.join(" "));
+        use std::os::unix::process::CommandExt;
+        let mut cmd = std::process::Command::new(default_shell());
+        // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
+        // получает SIGTTOU («suspended (tty output)»). setsid отрезает его от управляющего терминала.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        cmd.args(["-l", "-i", "-c", &script])
+            .env("SHELL_SESSIONS_DISABLE", "1")
+            .env_remove("TERM_SESSION_ID")
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(out) = cmd.output() {
+            // шелл может напечатать приветствие — берём только строки «имя<TAB>/путь»
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                if let Some((name, path)) = line.split_once('\t') {
+                    let path = path.trim();
+                    if path.starts_with('/') {
+                        paths.insert(name.to_string(), path.to_string());
+                    }
+                }
+            }
+        }
     }
-    let shell = default_shell();
-    use std::os::unix::process::CommandExt;
-    let mut cmd = std::process::Command::new(shell);
-    // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
-    // получает SIGTTOU («suspended (tty output)»). setsid отрезает его от управляющего терминала.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    cmd.args(["-l", "-i", "-c", &format!("command -v {}", shq(bin))])
-        .env("SHELL_SESSIONS_DISABLE", "1")
-        .env_remove("TERM_SESSION_ID")
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    cmd.output()
-        .ok()
-        .filter(|o| o.status.success())
-        // шелл может напечатать приветствие — путь всегда в последней строке
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout).lines().map(str::trim).rfind(|l| l.starts_with('/')).map(str::to_string)
-        })
+    bins.iter().map(|b| if *b == "$SHELL" { Some(default_shell()) } else { paths.get(*b).cloned() }).collect()
 }
 
 /// Отдаёт вывод агента эмулятору. Эмулятор не умеет `CSI 3 J` («очистить и историю прокрутки») — а именно её
@@ -701,6 +711,21 @@ pub fn excerpt(rows: &[String]) -> Vec<String> {
         None => (lines.len().saturating_sub(8), lines.len()),
     };
     lines[start..end].to_vec()
+}
+
+#[cfg(test)]
+mod find_tests {
+    use super::*;
+
+    #[test]
+    fn finds_all_commands_with_one_shell() {
+        let r = find_binaries(&["sh", "radar-no-such-binary-xyz", "$SHELL", "env"]);
+        assert!(r[0].as_deref().is_some_and(|p| p.starts_with('/')), "{r:?}");
+        assert!(r[1].is_none(), "{r:?}");
+        assert_eq!(r[2], Some(default_shell()));
+        assert!(r[3].as_deref().is_some_and(|p| p.ends_with("/env")), "{r:?}");
+        assert!(find_binaries(&[]).is_empty());
+    }
 }
 
 #[cfg(test)]

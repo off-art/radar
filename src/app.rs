@@ -253,18 +253,16 @@ impl App {
 
     /// Проверяет в фоне, какие агенты установлены (параллельно, чтобы не тормозить запуск).
     fn detect_agents(&mut self) {
-        let n = self.cfg.agents.len();
-        *self.available.lock_or_recover() = vec![None; n];
-        for (i, def) in self.cfg.agents.iter().enumerate() {
-            let bin = def.command.split_whitespace().next().unwrap_or("").to_string();
-            let shared = self.available.clone();
-            std::thread::spawn(move || {
-                let ok = crate::session::find_binary(&bin).is_some();
-                if let Some(slot) = shared.lock_or_recover().get_mut(i) {
-                    *slot = Some(ok);
-                }
-            });
-        }
+        *self.available.lock_or_recover() = vec![None; self.cfg.agents.len()];
+        let bins: Vec<String> = self.cfg.agents.iter().map(|d| d.bin().to_string()).collect();
+        let shared = self.available.clone();
+        std::thread::spawn(move || {
+            let refs: Vec<&str> = bins.iter().map(String::as_str).collect();
+            let found = crate::session::find_binaries(&refs);
+            for (slot, f) in shared.lock_or_recover().iter_mut().zip(found) {
+                *slot = Some(f.is_some());
+            }
+        });
     }
 
     /// Установлен ли агент (пока проверка не закончилась — считаем, что да).
