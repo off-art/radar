@@ -52,6 +52,16 @@ pub fn status_color(th: &Theme, s: &Session) -> Color {
     }
 }
 
+/// Вордмарк `radar_`: буквы обычным цветом, подчёркивание-курсор фирменного оранжевого
+/// (на 16-цветных схемах — цвет `peach`). Правила бренда — assets/brand/README.md.
+fn wordmark(th: &Theme, text: Color) -> Vec<Span<'static>> {
+    let brand = if matches!(th.peach, Color::Rgb(..)) { Color::Rgb(245, 158, 11) } else { th.peach };
+    vec![
+        Span::styled("radar", Style::default().fg(text).add_modifier(ratatui::style::Modifier::BOLD)),
+        Span::styled("_", Style::default().fg(brand).add_modifier(ratatui::style::Modifier::BOLD)),
+    ]
+}
+
 fn icon(s: &Session, ms: u128) -> &'static str {
     match s.status {
         Status::Working => SPINNER[(ms / 80) as usize % SPINNER.len()],

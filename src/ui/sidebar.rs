@@ -36,10 +36,9 @@ pub(super) fn draw_sidebar(f: &mut Frame, app: &App) {
     let working = app.sessions.iter().filter(|s| s.status == Status::Working).count();
     let waiting = app.sessions.iter().filter(|s| s.status == Status::Waiting).count();
     let idle = app.sessions.iter().filter(|s| s.status == Status::Idle).count();
-    let title = Line::from(vec![
-        Span::styled(" ◎ ", Style::default().fg(th.peach)),
-        Span::styled("Radar", Style::default().add_modifier(Modifier::BOLD)),
-    ]);
+    let mut title_spans = vec![Span::raw(" ")];
+    title_spans.extend(super::wordmark(th, th.text));
+    let title = Line::from(title_spans);
     buf.set_line(area.x, area.y, &title, w as u16);
     if g.new_btn.width > 0 {
         let btn = Line::from(Span::styled(" + новый ", Style::default().fg(th.on_color).bg(th.subtext)));

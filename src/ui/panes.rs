@@ -218,7 +218,7 @@ pub(super) fn draw_welcome(f: &mut Frame, app: &App) {
         return;
     }
     let lines = vec![
-        Line::from(Span::styled("◎ Radar", Style::default().fg(th.peach).add_modifier(Modifier::BOLD))),
+        Line::from(super::wordmark(th, th.text)),
         Line::from(""),
         Line::from("Несколько AI-агентов в одном окне терминала"),
         Line::from(""),

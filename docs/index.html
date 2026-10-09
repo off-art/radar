@@ -5,263 +5,723 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Radar: много AI-агентов в одном терминале</title>
 <meta name="description" content="Radar запускает Claude Code, Codex, OpenCode, Qwen Code, GigaCode и Gemini CLI в одном окне терминала со статусами, git и уведомлениями.">
+<meta name="theme-color" content="#0b0e13">
 <link rel="icon" type="image/svg+xml" href="brand/radar-favicon.svg">
 <link rel="apple-touch-icon" href="brand/favicon-180.png">
 <meta property="og:title" content="Radar: many AI agents in one terminal window">
 <meta property="og:description" content="Claude Code, Codex, OpenCode, Qwen Code, GigaCode and Gemini CLI in one window, with statuses, git and notifications.">
 <meta property="og:image" content="https://off-art.github.io/radar/social-preview.png">
 <meta name="twitter:card" content="summary_large_image">
+<script>document.documentElement.classList.add('js');</script>
 <style>
   :root {
-    --bg: #0e1116; --bg2: #151a22; --line: #252c38; --text: #e6e9ef; --muted: #8b94a5;
-    --accent: #f59e0b; --green: #4ade80; --yellow: #facc15; --blue: #60a5fa; --red: #f87171;
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+    --bg: #090c11; --bg2: #10151c; --bg3: #161c26; --line: #222a37; --line2: #2f3948;
+    --text: #e8ebf1; --muted: #8d97a8; --dim: #5c6677;
+    --accent: #f59e0b; --accent-ink: #1a1203; --glow: rgba(245,158,11,.18);
+    --green: #4ade80; --yellow: #facc15; --blue: #60a5fa; --red: #f87171;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Charter, Georgia, "Noto Serif", serif;
   }
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
-      --bg: #fbfaf7; --bg2: #ffffff; --line: #e4e0d6; --text: #1b1e24; --muted: #647084;
-      --accent: #d97706; --green: #16a34a; --yellow: #ca8a04; --blue: #2563eb; --red: #dc2626;
+      color-scheme: light;
+      --bg: #f7f2e8; --bg2: #fffdf8; --bg3: #f0eadc; --line: #e2dac7; --line2: #cfc5ad;
+      --text: #1b1e24; --muted: #5d6676; --dim: #8a8f99;
+      --accent: #c26a05; --accent-ink: #fff; --glow: rgba(217,119,6,.16);
+      --green: #15803d; --yellow: #a16207; --blue: #1d4ed8; --red: #b91c1c;
     }
   }
   :root[data-theme="light"] {
-    --bg: #fbfaf7; --bg2: #ffffff; --line: #e4e0d6; --text: #1b1e24; --muted: #647084;
-    --accent: #d97706; --green: #16a34a; --yellow: #ca8a04; --blue: #2563eb; --red: #dc2626;
+    color-scheme: light;
+    --bg: #f7f2e8; --bg2: #fffdf8; --bg3: #f0eadc; --line: #e2dac7; --line2: #cfc5ad;
+    --text: #1b1e24; --muted: #5d6676; --dim: #8a8f99;
+    --accent: #c26a05; --accent-ink: #fff; --glow: rgba(217,119,6,.16);
+    --green: #15803d; --yellow: #a16207; --blue: #1d4ed8; --red: #b91c1c;
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17.5px/1.65 var(--serif); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  body::before { /* зерно */
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; opacity: .05; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
   a { color: inherit; }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
-
-  nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; }
-  .brand { display: inline-flex; text-decoration: none; }
-  .brand img { display: block; }
-  .nav-r { display: flex; gap: 8px; align-items: center; font-size: 14px; }
-  .nav-r a.link { color: var(--muted); text-decoration: none; padding: 6px 10px; }
-  .nav-r a.link:hover { color: var(--text); }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .seg button { background: none; border: 0; color: var(--muted); padding: 5px 10px; font: 600 12px var(--mono); cursor: pointer; }
-  .seg button[aria-pressed="true"] { background: var(--accent); color: #111; }
-
-  .hero { text-align: center; padding: 56px 0 36px; }
-  .hero h1 { font-size: clamp(32px, 6vw, 56px); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 16px; }
-  .hero h1 em { font-style: normal; color: var(--accent); }
-  .hero p.lead { max-width: 620px; margin: 0 auto 28px; color: var(--muted); font-size: 18px; }
-  .cta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
-  .btn { display: inline-block; padding: 11px 20px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #111; }
-  .btn:hover { filter: brightness(1.08); }
-
-  .install { margin: 28px auto 0; max-width: 800px; display: flex; align-items: center; gap: 10px; background: var(--bg2);
-    border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 10px 16px; font: 13px var(--mono); text-align: left; }
-  .install code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
-  .install code::before { content: "$ "; color: var(--muted); }
-  .install button { background: var(--line); color: var(--text); border: 0; border-radius: 8px; padding: 7px 12px; font: 600 12px var(--sans); cursor: pointer; }
-  .install button:hover { background: var(--accent); color: #111; }
-
-  /* терминал-макет */
-  .term { margin: 44px auto 0; max-width: 940px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
-    background: #0b0e13; color: #dbe1ea; box-shadow: 0 30px 80px -30px rgba(0,0,0,.55); text-align: left; }
-  .term-bar { display: flex; gap: 7px; padding: 11px 14px; background: #131820; border-bottom: 1px solid #1f2733; }
-  .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: #2c3442; }
-  .term-bar i:nth-child(1) { background: #ff5f57; } .term-bar i:nth-child(2) { background: #febc2e; } .term-bar i:nth-child(3) { background: #28c840; }
-  .term-body { display: grid; grid-template-columns: 270px 1fr; font: 13px/1.55 var(--mono); min-height: 330px; }
-  .side { border-right: 1px solid #1f2733; padding: 12px 0; background: #0e1219; }
-  .side h4 { margin: 0 14px 8px; font: 600 11px var(--mono); color: #6b7688; letter-spacing: .08em; text-transform: uppercase; }
-  .row { padding: 6px 14px; border-left: 3px solid transparent; }
-  .row.sel { background: #19202b; border-left-color: #f59e0b; }
-  .row .l1 { display: flex; justify-content: space-between; gap: 8px; }
-  .row .l2 { color: #6b7688; font-size: 12px; }
-  .st { font-size: 12px; }
-  .st.work { color: #60a5fa; } .st.wait { color: #facc15; } .st.done { color: #4ade80; }
-  .st.work::before { content: "⠋ "; display: inline-block; animation: spin 1s steps(1) infinite; }
-  @keyframes spin { 0%{content:"⠋ "} 12%{content:"⠙ "} 25%{content:"⠹ "} 37%{content:"⠸ "} 50%{content:"⠼ "} 62%{content:"⠴ "} 75%{content:"⠦ "} 87%{content:"⠧ "} }
-  .main { padding: 14px 18px; }
-  .main .prompt { color: #4ade80; } .main .dim { color: #6b7688; } .main .add { color: #4ade80; } .main .del { color: #f87171; }
-  .line { opacity: 0; animation: show .01s forwards; white-space: pre-wrap; }
-  .l1a { animation-delay: .4s } .l2a { animation-delay: 1.2s } .l3a { animation-delay: 2.2s } .l4a { animation-delay: 3.2s } .l5a { animation-delay: 4.2s }
-  @keyframes show { to { opacity: 1; } }
-  .cursor { display: inline-block; width: 8px; height: 15px; background: #dbe1ea; vertical-align: -2px; animation: blink 1s steps(1) infinite; }
-  @keyframes blink { 50% { opacity: 0; } }
-  .status-bar { display: flex; justify-content: space-between; padding: 6px 14px; background: #f59e0b; color: #111; font: 600 12px var(--mono); }
-  @media (max-width: 720px) { .term-body { grid-template-columns: 1fr; } .side { border-right: 0; border-bottom: 1px solid #1f2733; } }
-
-  section { padding: 56px 0 8px; }
-  section h2 { font-size: 28px; letter-spacing: -.02em; margin: 0 0 8px; }
-  section p.sub { color: var(--muted); margin: 0 0 28px; max-width: 640px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
-  .card { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
-  .card h3 { margin: 0 0 6px; font-size: 16px; }
-  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
-  .card .ic { font: 700 13px var(--mono); color: var(--accent); margin-bottom: 8px; }
-
-  table { width: 100%; border-collapse: collapse; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
-  tr:last-child td { border-bottom: 0; }
-  kbd { font: 600 12.5px var(--mono); background: var(--bg); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; }
-  .agents { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-  .chip { font: 600 13px var(--mono); border: 1px solid var(--line); background: var(--bg2); padding: 6px 12px; border-radius: 999px; }
-
-  .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
-  .docs a { display: block; text-decoration: none; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
-  .docs a:hover { border-color: var(--accent); }
-  .docs b { display: block; margin-bottom: 2px; }
-  .docs span { color: var(--muted); font-size: 14px; }
-
-  footer { margin-top: 64px; border-top: 1px solid var(--line); padding: 26px 0 44px; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+  code, kbd, .mono { font-family: var(--mono); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 22px; position: relative; }
   [data-l]:not(.on) { display: none !important; }
-  @media (prefers-reduced-motion: reduce) { .line { animation-duration: 0s; animation-delay: 0s !important; } .cursor, .st.work::before { animation: none; } }
+  .lbl { font: 600 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+
+  /* навигация */
+  nav { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    background: color-mix(in srgb, var(--bg) 72%, transparent); border-bottom: 1px solid transparent; transition: border-color .3s; }
+  nav.stuck { border-bottom-color: var(--line); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 62px; }
+  .brand { display: inline-flex; text-decoration: none; }
+  .brand img { display: block; height: 28px; width: auto; }
+  .nav-r { display: flex; gap: 4px; align-items: center; font: 500 13.5px var(--mono); }
+  .nav-r a.link { color: var(--muted); text-decoration: none; padding: 7px 11px; border-radius: 8px; transition: color .2s, background .2s; }
+  .nav-r a.link:hover { color: var(--text); background: var(--bg3); }
+  .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 9px; overflow: hidden; margin-left: 8px; }
+  .seg button { background: none; border: 0; color: var(--muted); padding: 6px 10px; font: 600 12px var(--mono); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .iconbtn { background: none; border: 1px solid var(--line2); color: var(--muted); width: 32px; height: 30px; border-radius: 9px; cursor: pointer; margin-left: 6px; font-size: 14px; }
+  .iconbtn:hover { color: var(--text); }
+  @media (max-width: 760px) { .nav-r a.link:not(.gh) { display: none; } }
+
+  /* hero */
+  .hero { position: relative; padding: 72px 0 40px; text-align: center; overflow: hidden; }
+  .radar { position: absolute; left: 50%; top: -120px; width: 1100px; height: 1100px; transform: translateX(-50%); pointer-events: none; z-index: 0;
+    -webkit-mask-image: radial-gradient(closest-side, #000 20%, transparent 92%); mask-image: radial-gradient(closest-side, #000 20%, transparent 92%); }
+  .radar .rings { position: absolute; inset: 0; border-radius: 50%;
+    background:
+      repeating-radial-gradient(circle at center, transparent 0 89px, color-mix(in srgb, var(--accent) 22%, transparent) 90px 91px),
+      linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 14%, transparent)) center/1px 100% no-repeat,
+      linear-gradient(color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 14%, transparent)) center/100% 1px no-repeat; }
+  .radar .sweep { position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0deg 292deg, color-mix(in srgb, var(--accent) 34%, transparent) 358deg, color-mix(in srgb, var(--accent) 60%, transparent) 360deg);
+    animation: sweep 9s linear infinite; }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .blip { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px 2px var(--accent); opacity: 0; animation: blip 9s linear infinite; }
+  @keyframes blip { 0% { opacity: 1; transform: scale(1.5); } 8% { opacity: .85; transform: scale(1); } 60% { opacity: 0; } 100% { opacity: 0; } }
+  .hero .wrap { z-index: 1; }
+  .pill { display: inline-flex; gap: 10px; align-items: center; font: 500 12.5px var(--mono); color: var(--muted); border: 1px solid var(--line2);
+    background: color-mix(in srgb, var(--bg2) 80%, transparent); border-radius: 999px; padding: 6px 14px 6px 10px; text-decoration: none; margin-bottom: 26px; }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  h1 { font: 800 clamp(40px, 8.4vw, 92px)/.98 var(--mono); letter-spacing: -.055em; margin: 0 0 22px; }
+  h1 .acc { color: var(--accent); }
+  h1 .cur { display: inline-block; width: .52em; height: .11em; background: var(--accent); margin-left: .06em; vertical-align: .02em; border-radius: 2px; animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .lead { max-width: 640px; margin: 0 auto 30px; color: var(--muted); font-size: 20px; line-height: 1.55; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 11px; font: 600 14px var(--mono); text-decoration: none; border: 1px solid var(--line2); background: var(--bg2); transition: transform .15s, border-color .2s, box-shadow .2s; }
+  .btn:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 30px -10px var(--accent); }
+
+  .cmd { margin: 26px auto 0; max-width: 760px; display: flex; align-items: center; gap: 10px; background: color-mix(in srgb, var(--bg2) 88%, transparent); border: 1px solid var(--line2);
+    border-radius: 12px; padding: 9px 9px 9px 16px; font: 13.5px var(--mono); text-align: left; }
+  .cmd code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .cmd code::before { content: "$ "; color: var(--accent); }
+  .cmd button, .copy { background: var(--bg3); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; font: 600 12px var(--mono); cursor: pointer; transition: background .2s, color .2s; }
+  .cmd button:hover, .copy:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  /* терминал */
+  .stage { position: relative; margin-top: 58px; z-index: 1; }
+  .stage::before { content: ""; position: absolute; inset: 8% 6% -6%; background: radial-gradient(closest-side, var(--glow), transparent 75%); filter: blur(30px); z-index: -1; }
+  .term { max-width: 1000px; margin: 0 auto; border: 1px solid var(--line2); border-radius: 15px; overflow: hidden; background: #0a0d12; color: #dde3ec; text-align: left;
+    box-shadow: 0 50px 100px -40px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.02) inset; }
+  .tbar { display: grid; grid-template-columns: 70px 1fr 70px; align-items: center; padding: 10px 14px; background: #10151c; border-bottom: 1px solid #1d2531; }
+  .tbar .dots { display: flex; gap: 7px; }
+  .tbar .dots i { width: 11px; height: 11px; border-radius: 50%; background: #ff5f57; }
+  .tbar .dots i:nth-child(2) { background: #febc2e; } .tbar .dots i:nth-child(3) { background: #28c840; }
+  .tbar .ttl { text-align: center; font: 12px var(--mono); color: #6f7a8c; }
+  .screen { position: relative; display: grid; grid-template-columns: 290px 1fr; grid-template-rows: minmax(0, 1fr); height: 410px; font: 12.5px/1.5 var(--mono); }
+  .side { border-right: 1px solid #1d2531; background: #0d1117; padding: 10px 0; overflow: hidden; }
+  .side .hd { padding: 0 14px 8px; color: #7d889b; display: flex; gap: 10px; }
+  .side .hd b { color: #e8ebf1; }
+  .row { padding: 7px 14px; border-left: 3px solid transparent; transition: background .25s; }
+  .row.sel { background: #1a212d; border-left-color: var(--accent); }
+  .row .l1 { display: flex; justify-content: space-between; gap: 8px; }
+  .row .l1 b { color: #e8ebf1; font-weight: 600; }
+  .row .l2 { color: #66717f; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .l3 { color: #facc15; font-size: 11.5px; }
+  .row .l3.hint { color: #60a5fa; font-weight: 600; }
+  .st.work { color: #60a5fa; } .st.wait { color: #facc15; } .st.done { color: #4ade80; }
+  .st.work::before { content: "⠋ "; animation: spin .9s steps(1) infinite; }
+  @keyframes spin { 0%{content:"⠋ "} 10%{content:"⠙ "} 20%{content:"⠹ "} 30%{content:"⠸ "} 40%{content:"⠼ "} 50%{content:"⠴ "} 60%{content:"⠦ "} 70%{content:"⠧ "} 80%{content:"⠇ "} 90%{content:"⠏ "} }
+  .main { padding: 12px 16px; overflow: hidden; position: relative; }
+  .main .ln { white-space: pre-wrap; animation: show .25s ease-out; }
+  @keyframes show { from { opacity: 0; transform: translateY(3px); } }
+  .p { color: #4ade80; } .dm { color: #66717f; } .ad { color: #4ade80; } .de { color: #f87171; } .bl { color: #60a5fa; } .or { color: #f59e0b; } .ye { color: #facc15; }
+  .menu .sel { color: #60a5fa; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; height: 100%; }
+  .tile { border: 1px solid #263041; border-radius: 8px; padding: 8px 10px; overflow: hidden; background: #0d1117; min-width: 0; }
+  .tile h5 { margin: 0 0 6px; font: 600 11.5px var(--mono); display: flex; justify-content: space-between; color: #e8ebf1; }
+  .tile.sel { border-color: var(--accent); }
+  .tile .ln { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5,7,10,.55); animation: fade .25s ease-out; z-index: 3; }
+  @keyframes fade { from { opacity: 0; } }
+  .box { background: #151b25; border: 1px solid #36435a; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.6); max-width: 92%; width: 560px; overflow: hidden; }
+  .box .bt { padding: 7px 12px; background: #1c2431; color: #aeb8c8; font-weight: 600; border-bottom: 1px solid #2a3547; }
+  .box .bb { padding: 12px 14px; }
+  .box .ac { display: flex; gap: 14px; padding: 0 14px 12px; }
+  .key { display: inline-block; background: #60a5fa; color: #06101f; font-weight: 700; padding: 0 7px; border-radius: 4px; }
+  .key.g { background: #2a3547; color: #cfd6e2; }
+  .box.wide { width: 94%; height: 88%; display: flex; flex-direction: column; }
+  .box.wide .bb { flex: 1; overflow: hidden; padding: 8px 14px; }
+  .dfile { color: #f59e0b; } .hunk { color: #60a5fa; }
+  .tstatus { display: flex; justify-content: space-between; gap: 12px; padding: 6px 14px; background: #131923; color: #6f7a8c; font: 12px var(--mono); border-top: 1px solid #1d2531; min-height: 31px; }
+  .tstatus .nav { background: var(--accent); color: #1a1203; font-weight: 700; padding: 0 8px; border-radius: 3px; }
+  .tstatus .toast { color: #1a1203; background: #7fb2f5; font-weight: 600; padding: 0 8px; border-radius: 3px; animation: show .3s; }
+  .keycap { position: absolute; right: 14px; bottom: 48px; display: flex; gap: 6px; z-index: 5; pointer-events: none; }
+  .keycap span { font: 700 13px var(--mono); background: #e8ebf1; color: #10151c; padding: 5px 11px; border-radius: 7px; border-bottom: 3px solid #9aa4b4; box-shadow: 0 8px 20px rgba(0,0,0,.5); animation: cap .9s ease-out forwards; }
+  @keyframes cap { 0% { opacity: 0; transform: translateY(8px) scale(.9); } 12% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-4px); } }
+
+  .scenes { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 22px auto 0; max-width: 1000px; }
+  .scene { position: relative; overflow: hidden; display: inline-flex; gap: 9px; align-items: center; border: 1px solid var(--line2); background: var(--bg2); color: var(--muted); border-radius: 10px; padding: 8px 14px; font: 600 12.5px var(--mono); cursor: pointer; transition: color .2s, border-color .2s; }
+  .scene kbd { font: 700 11px var(--mono); background: var(--bg3); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; color: var(--text); }
+  .scene:hover { color: var(--text); border-color: var(--accent); }
+  .scene[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+  .scene::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--accent); }
+  .scene[aria-pressed="true"]::after { animation: prog var(--dur, 8s) linear forwards; }
+  @keyframes prog { to { width: 100%; } }
+  @media (max-width: 760px) {
+    .screen { grid-template-columns: 1fr; height: 460px; grid-template-rows: auto minmax(0, 1fr); }
+    .side { border-right: 0; border-bottom: 1px solid #1d2531; }
+    .row .l2, .row .l3 { display: none; }
+  }
+
+  /* бегущая строка агентов */
+  .marq { margin-top: 70px; border-block: 1px solid var(--line); overflow: hidden; padding: 16px 0; -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+  .marq .track { display: flex; gap: 46px; width: max-content; animation: marq 32s linear infinite; font: 600 15px var(--mono); color: var(--muted); }
+  .marq .track span::before { content: "◉ "; color: var(--accent); }
+  @keyframes marq { to { transform: translateX(-50%); } }
+
+  /* секции */
+  section { padding: 104px 0 0; }
+  h2 { font: 800 clamp(30px, 5vw, 52px)/1.04 var(--mono); letter-spacing: -.045em; margin: 10px 0 14px; max-width: 760px; }
+  h2 em { font-style: normal; color: var(--accent); }
+  .sub { color: var(--muted); max-width: 640px; margin: 0 0 40px; font-size: 19px; }
+
+  .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+  .card { position: relative; overflow: hidden; background: var(--bg2); border: 1px solid var(--line); border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 10px; transition: border-color .25s, transform .25s; }
+  .card::before { content: ""; position: absolute; inset: 0; background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), var(--glow), transparent 60%); opacity: 0; transition: opacity .3s; pointer-events: none; }
+  .card:hover { border-color: var(--line2); transform: translateY(-3px); }
+  .card:hover::before { opacity: 1; }
+  .c2 { grid-column: span 2; } .c3 { grid-column: span 3; } .c4 { grid-column: span 4; }
+  @media (max-width: 900px) { .c2, .c3, .c4 { grid-column: span 6; } }
+  @media (min-width: 901px) and (max-width: 1060px) { .c2 { grid-column: span 3; } }
+  .card h3 { font: 700 19px/1.25 var(--mono); letter-spacing: -.02em; margin: 0; }
+  .card p { margin: 0; color: var(--muted); font-size: 16.5px; line-height: 1.55; }
+  .card code { font-size: .88em; background: var(--bg3); padding: 1px 6px; border-radius: 5px; }
+  .vis { margin-top: auto; padding-top: 14px; font: 12.5px/1.55 var(--mono); }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pills > span { border: 1px solid var(--line2); border-radius: 999px; padding: 4px 12px; background: var(--bg); }
+  .pills .w { color: var(--blue); } .pills .y { color: var(--yellow); } .pills .g { color: var(--green); }
+  .mtoast { display: flex; gap: 12px; align-items: center; background: #1a1f29; color: #e8ebf1; border-radius: 14px; padding: 10px 14px; box-shadow: 0 14px 30px -14px rgba(0,0,0,.6); border: 1px solid #2c3544; }
+  .mtoast img { width: 36px; height: 36px; border-radius: 9px; }
+  .mtoast b { display: block; font: 600 13px var(--mono); } .mtoast small { color: #9aa4b4; font: 12px var(--mono); }
+  .mdiff div { white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+  .term-snip { background: #0a0d12; color: #dde3ec; border: 1px solid var(--line2); border-radius: 10px; padding: 12px 14px; overflow-x: auto; white-space: pre; }
+  .term-snip .c { color: #5c6677; } .term-snip .s { color: #4ade80; } .term-snip .o { color: #f59e0b; }
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatches i { width: 26px; height: 26px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); }
+
+  /* как это устроено */
+  .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: var(--bg2); }
+  .flow > div { padding: 28px; border-right: 1px solid var(--line); }
+  .flow > div:last-child { border-right: 0; }
+  .flow .n { font: 800 44px/1 var(--mono); color: var(--accent); letter-spacing: -.05em; opacity: .9; margin-bottom: 14px; }
+  .flow h3 { font: 700 18px var(--mono); margin: 0 0 8px; letter-spacing: -.02em; }
+  .flow p { margin: 0; color: var(--muted); font-size: 16.5px; }
+  @media (max-width: 860px) { .flow { grid-template-columns: 1fr; } .flow > div { border-right: 0; border-bottom: 1px solid var(--line); } .flow > div:last-child { border-bottom: 0; } }
+
+  /* клавиши */
+  .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .k { display: flex; gap: 14px; align-items: center; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; text-align: left; font: inherit; color: inherit; width: 100%; }
+  button.k { cursor: pointer; transition: border-color .2s, transform .15s; }
+  button.k:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .k kbd { flex: none; min-width: 44px; text-align: center; font: 700 17px var(--mono); background: var(--bg3); border: 1px solid var(--line2); border-bottom-width: 4px; border-radius: 10px; padding: 8px 10px; }
+  .k span { font-size: 16px; color: var(--muted); line-height: 1.35; }
+  .k em { display: block; font: 600 11px var(--mono); color: var(--accent); font-style: normal; margin-top: 2px; letter-spacing: .06em; }
+  .note { margin-top: 18px; color: var(--muted); font-size: 16px; }
+  .note kbd { font: 600 12.5px var(--mono); background: var(--bg3); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; }
+
+  /* установка */
+  .inst { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 900px) { .inst { grid-template-columns: 1fr; } }
+  .inst .card { gap: 12px; }
+  .inst .term-snip { position: relative; padding-right: 76px; }
+  .inst .copy { position: absolute; right: 8px; top: 8px; padding: 5px 9px; font-size: 11px; }
+  .after { margin-top: 18px; background: var(--bg2); border: 1px dashed var(--line2); border-radius: 14px; padding: 16px 20px; font: 13.5px/1.7 var(--mono); color: var(--muted); }
+  .after b { color: var(--text); font-weight: 600; }
+
+  /* документация */
+  .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .docs a { display: flex; justify-content: space-between; align-items: center; gap: 12px; text-decoration: none; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; transition: border-color .2s, transform .15s; }
+  .docs a:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .docs b { display: block; font: 700 16px var(--mono); letter-spacing: -.02em; }
+  .docs small { color: var(--muted); font-size: 15px; }
+  .docs i { font-style: normal; color: var(--accent); font: 700 18px var(--mono); transition: transform .2s; }
+  .docs a:hover i { transform: translateX(4px); }
+
+  .final { margin-top: 110px; text-align: center; padding: 70px 22px; border: 1px solid var(--line); border-radius: 26px; background:
+    radial-gradient(600px 260px at 50% 0%, var(--glow), transparent 70%), var(--bg2); }
+  .final h2 { margin: 0 auto 16px; }
+  .final .sub { margin: 0 auto 28px; }
+  footer { margin-top: 70px; border-top: 1px solid var(--line); padding: 28px 0 56px; color: var(--muted); font: 13.5px var(--mono); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: center; }
+  footer img { height: 22px; display: block; }
+  footer a { text-decoration: none; margin-left: 16px; } footer a:hover { color: var(--accent); }
+
+  /* появление при прокрутке (без JS всё видно) */
+  .js .rv { opacity: 0; transform: translateY(26px); transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); transition-delay: var(--d, 0s); }
+  .js .rv.in { opacity: 1; transform: none; }
+  .hero .rv { --d: 0s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .radar .sweep, .marq .track, .pill i, h1 .cur, .st.work::before, .scene::after { animation: none !important; }
+    .blip { animation: none; opacity: .8; }
+    .js .rv { opacity: 1; transform: none; transition: none; }
+    .ln, .overlay, .toast { animation: none !important; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <nav>
+
+<nav id="nav">
+  <div class="wrap">
     <a class="brand" href="#top" aria-label="radar_">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="brand/radar-wordmark-on-dark.svg">
-        <img src="brand/radar-wordmark-on-light.svg" alt="radar_" height="30">
-      </picture>
+      <img class="logo-d" src="brand/radar-wordmark-on-dark.svg" alt="radar_">
     </a>
     <div class="nav-r">
       <a class="link" href="#features"><span data-l="ru">Возможности</span><span data-l="en">Features</span></a>
+      <a class="link" href="#keys"><span data-l="ru">Клавиши</span><span data-l="en">Keys</span></a>
+      <a class="link" href="#install"><span data-l="ru">Установка</span><span data-l="en">Install</span></a>
       <a class="link" href="#docs"><span data-l="ru">Документация</span><span data-l="en">Docs</span></a>
-      <a class="link" href="https://github.com/off-art/radar">GitHub</a>
+      <a class="link gh" href="https://github.com/off-art/radar">GitHub</a>
       <div class="seg" role="group" aria-label="Language">
         <button type="button" data-set="ru" aria-pressed="true">RU</button>
         <button type="button" data-set="en" aria-pressed="false">EN</button>
       </div>
+      <button class="iconbtn" id="theme" type="button" aria-label="Theme" title="Theme">◐</button>
     </div>
-  </nav>
+  </div>
+</nav>
 
-  <header class="hero" id="top">
-    <h1>
-      <span data-l="ru">Много AI-агентов.<br><em>Одно окно.</em></span>
-      <span data-l="en">Many AI agents.<br><em>One window.</em></span>
+<header class="hero" id="top">
+  <div class="radar" aria-hidden="true">
+    <div class="rings"></div>
+    <div class="sweep"></div>
+    <i class="blip" style="left:63%;top:30%;animation-delay:2.6s"></i>
+    <i class="blip" style="left:34%;top:41%;animation-delay:6.4s"></i>
+    <i class="blip" style="left:58%;top:62%;animation-delay:.5s"></i>
+    <i class="blip" style="left:41%;top:23%;animation-delay:7.9s"></i>
+  </div>
+  <div class="wrap">
+    <a class="pill rv" id="ver" href="https://github.com/off-art/radar/releases/latest"><i></i><span id="vertxt">open source · MIT</span></a>
+    <h1 class="rv" style="--d:.05s">
+      <span data-l="ru">Много агентов.<br><span class="acc">Одно окно</span><span class="cur"></span></span>
+      <span data-l="en">Many agents.<br><span class="acc">One window</span><span class="cur"></span></span>
     </h1>
-    <p class="lead">
-      <span data-l="ru">Radar показывает, кто из агентов работает, кто закончил и кому нужен ваш ответ. Один бинарник на Rust, прямо в терминале.</span>
-      <span data-l="en">Radar shows which agents are working, which are done and which need your answer. A single Rust binary, right in your terminal.</span>
+    <p class="lead rv" style="--d:.12s">
+      <span data-l="ru">Radar запускает Claude Code, Codex, Qwen Code и других агентов в одном терминале и показывает, кто работает, кто закончил, а кому нужен ваш ответ. Один бинарник на Rust.</span>
+      <span data-l="en">Radar runs Claude Code, Codex, Qwen Code and other agents in one terminal and shows who is working, who is done and who needs your answer. A single Rust binary.</span>
     </p>
-    <div class="cta">
-      <a class="btn primary" href="#install"><span data-l="ru">Установить</span><span data-l="en">Install</span></a>
-      <a class="btn" href="https://github.com/off-art/radar"><span data-l="ru">Код на GitHub</span><span data-l="en">View on GitHub</span></a>
+    <div class="cta rv" style="--d:.18s">
+      <a class="btn primary" href="#install"><span data-l="ru">Установить</span><span data-l="en">Install</span> →</a>
+      <a class="btn" href="https://github.com/off-art/radar">★ <span data-l="ru">Код на GitHub</span><span data-l="en">View on GitHub</span></a>
+    </div>
+    <div class="cmd rv" style="--d:.24s">
+      <code>curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash</code>
+      <button type="button" class="copy-btn"><span data-l="ru">Копировать</span><span data-l="en">Copy</span></button>
     </div>
 
-    <div class="install" id="install">
-      <code id="cmd">curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash</code>
-      <button type="button" id="copy"><span data-l="ru">Копировать</span><span data-l="en">Copy</span></button>
-    </div>
-
-    <!-- Макет интерфейса. Заменить на docs/demo.gif, когда он будет записан -->
-    <div class="term" aria-label="Radar UI preview">
-      <div class="term-bar"><i></i><i></i><i></i></div>
-      <div class="term-body">
-        <div class="side">
-          <h4>radar</h4>
-          <div class="row sel"><div class="l1"><span>Claude Code</span><span class="st work">1:24</span></div><div class="l2">⎇ feat/health ●2 +38 −4</div></div>
-          <div class="row"><div class="l1"><span>Codex</span><span class="st wait">ждёт</span></div><div class="l2">⎇ feat/login ●5 +112 −31</div></div>
-          <div class="row"><div class="l1"><span>Qwen Code</span><span class="st done">✓ 4:12</span></div><div class="l2">⎇ docs/readme ●1 +64 −9</div></div>
+    <div class="stage rv" style="--d:.3s" id="demo">
+      <div class="term" role="img" aria-label="Radar: interactive demo">
+        <div class="tbar"><div class="dots"><i></i><i></i><i></i></div><div class="ttl">radar — ~/work</div><div></div></div>
+        <div class="screen" id="screen">
+          <div class="side" id="side"></div>
+          <div class="main" id="main"></div>
+          <div id="overlay"></div>
         </div>
-        <div class="main">
-          <div class="line l1a"><span class="prompt">❯</span> Добавь эндпоинт /health и тест</div>
-          <div class="line l2a dim">● Read(src/server.ts)</div>
-          <div class="line l3a"><span class="add">+ app.get('/health', (_req, res) =&gt; res.json({ ok: true }));</span></div>
-          <div class="line l4a dim">● Bash(npm test)</div>
-          <div class="line l5a"><span class="add">✓ 12 passed</span> <span class="cursor"></span></div>
-        </div>
+        <div class="tstatus" id="tstatus"></div>
+        <div class="keycap" id="keycap"></div>
       </div>
-      <div class="status-bar"><span>НАВИГАЦИЯ · NAV</span><span>Codex: Bash: rm -rf build — y</span></div>
+      <div class="scenes" id="scenes" role="group" aria-label="Demo scenes"></div>
     </div>
-  </header>
+  </div>
 
-  <section id="features">
-    <h2><span data-l="ru">Что внутри</span><span data-l="en">What you get</span></h2>
-    <p class="sub"><span data-l="ru">Всё, чтобы вести несколько агентов сразу и не терять нить.</span><span data-l="en">Everything you need to drive several agents at once without losing the thread.</span></p>
-    <div class="grid">
-      <div class="card"><div class="ic">01 ●</div>
+  <div class="marq" aria-label="Supported agents">
+    <div class="track" id="track"></div>
+  </div>
+</header>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <div class="lbl rv"><span data-l="ru">Возможности</span><span data-l="en">Features</span></div>
+    <h2 class="rv"><span data-l="ru">Всё, чтобы вести несколько агентов и <em>не терять нить</em></span><span data-l="en">Everything to drive several agents and <em>keep the thread</em></span></h2>
+    <p class="sub rv"><span data-l="ru">Вы работаете в одном окне, а Radar следит за остальным: статусы, git, уведомления и запросы разрешений.</span><span data-l="en">You work in one window while Radar watches the rest: statuses, git, notifications and approval requests.</span></p>
+
+    <div class="bento">
+      <div class="card c3 rv">
         <h3><span data-l="ru">Статусы в реальном времени</span><span data-l="en">Real-time statuses</span></h3>
-        <p><span data-l="ru">Работает, ждёт ответа, готов. Для Claude Code и Qwen Code точно, через хуки; для остальных по эвристике.</span><span data-l="en">Working, waiting, ready. Exact for Claude Code and Qwen Code via hooks; heuristics for the rest.</span></p></div>
-      <div class="card"><div class="ic">02 ♪</div>
+        <p><span data-l="ru">Работает, ждёт ответа, готов. Для Claude Code и Qwen Code точно, через хуки; для остальных по эвристике экрана.</span><span data-l="en">Working, waiting, ready. Exact for Claude Code and Qwen Code via hooks; screen heuristics for the rest.</span></p>
+        <div class="vis"><div class="pills"><span class="w">⠋ <span data-l="ru">работает</span><span data-l="en">working</span></span><span class="y">○ <span data-l="ru">ждёт ответа</span><span data-l="en">waiting</span></span><span class="g">✓ <span data-l="ru">готов</span><span data-l="en">done</span></span></div></div>
+      </div>
+      <div class="card c3 rv">
         <h3><span data-l="ru">Уведомления</span><span data-l="en">Notifications</span></h3>
-        <p><span data-l="ru">Системное уведомление и мягкий звук, когда агент закончил или ждёт вас. macOS и Linux.</span><span data-l="en">A system notification and a soft chime when an agent finishes or needs you. macOS and Linux.</span></p></div>
-      <div class="card"><div class="ic">03 ⎇</div>
-        <h3>Git</h3>
-        <p><span data-l="ru">Ветка и +/− у каждого агента, просмотр diff, commit, push, merge и worktree без выхода из Radar.</span><span data-l="en">Branch and +/− per agent, a diff viewer, commit, push, merge and worktrees without leaving Radar.</span></p></div>
-      <div class="card"><div class="ic">04 ⏻</div>
-        <h3><span data-l="ru">Фоновые сессии</span><span data-l="en">Background sessions</span></h3>
-        <p><span data-l="ru">Закрыли окно, агенты работают дальше. Запустили <code>radar</code> и вернулись на тот же экран.</span><span data-l="en">Close the window and agents keep going. Run <code>radar</code> and you are back on the same screen.</span></p></div>
-      <div class="card"><div class="ic">05 y</div>
-        <h3><span data-l="ru">Разрешения из списка</span><span data-l="en">Approve from the list</span></h3>
-        <p><span data-l="ru">Ответ на запрос агента одной клавишей, всегда с текстом запроса. Режима «разрешить всё» нет.</span><span data-l="en">Answer an agent's request with one key, always showing the request text. There is no "approve all".</span></p></div>
-      <div class="card"><div class="ic">06 &gt;_</div>
-        <h3><span data-l="ru">Управление из скриптов</span><span data-l="en">Scriptable</span></h3>
-        <p><span data-l="ru"><code>radar ctl new / send / wait / read</code> поднимает агентов и ждёт результата из любого скрипта.</span><span data-l="en"><code>radar ctl new / send / wait / read</code> starts agents and waits for results from any script.</span></p></div>
-    </div>
+        <p><span data-l="ru">Системное уведомление и мягкий звук, когда агент закончил или ждёт вас. macOS и Linux.</span><span data-l="en">A system notification and a soft chime when an agent finishes or needs you. macOS and Linux.</span></p>
+        <div class="vis"><div class="mtoast"><img src="brand/favicon-180.png" alt=""><div><b><span data-l="ru">Задача выполнена</span><span data-l="en">Task completed</span></b><small>Claude Code · radar</small></div></div></div>
+      </div>
 
-    <div style="margin-top:28px">
-      <p class="sub" style="margin-bottom:10px"><span data-l="ru">Поддерживаемые агенты</span><span data-l="en">Supported agents</span></p>
-      <div class="agents">
-        <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">OpenCode</span><span class="chip">Qwen Code</span><span class="chip">GigaCode</span><span class="chip">Gemini CLI</span><span class="chip">shell</span>
+      <div class="card c2 rv">
+        <h3>Git</h3>
+        <p><span data-l="ru">Ветка и +/− у каждого агента, diff, commit, push, merge и worktree.</span><span data-l="en">Branch and +/− per agent, diff, commit, push, merge and worktrees.</span></p>
+        <div class="vis mdiff"><div style="color:var(--accent)">⎇ feat/health  ●2 +13 −1</div><div style="color:var(--green)">+ app.get('/health', …</div><div style="color:var(--red)">− // TODO: health</div></div>
+      </div>
+      <div class="card c2 rv">
+        <h3><span data-l="ru">Фоновые сессии</span><span data-l="en">Background sessions</span></h3>
+        <p><span data-l="ru">Закрыли окно, агенты работают дальше. Запустили <code>radar</code> и вернулись на тот же экран.</span><span data-l="en">Close the window and agents keep going. Run <code>radar</code> and you are back on the same screen.</span></p>
+        <div class="vis"><div class="term-snip"><span class="c"># <span data-l="ru">агенты живут без окна</span><span data-l="en">agents live without a window</span></span>
+<span class="s">$</span> radar
+<span class="s">$</span> radar stop</div></div>
+      </div>
+      <div class="card c2 rv">
+        <h3><span data-l="ru">Разрешения из списка</span><span data-l="en">Approve from the list</span></h3>
+        <p><span data-l="ru">Ответ на запрос одной клавишей, всегда с текстом запроса. Режима «разрешить всё» нет.</span><span data-l="en">Answer a request with one key, always with the request text. There is no "approve all".</span></p>
+        <div class="vis"><div class="term-snip"><span class="o">Bash:</span> rm -rf dist
+<span style="color:#60a5fa">[Enter]</span> <span data-l="ru">подтвердить</span><span data-l="en">confirm</span>  <span class="c">[Esc]</span></div></div>
+      </div>
+
+      <div class="card c4 rv">
+        <h3><span data-l="ru">Управление из скриптов</span><span data-l="en">Scriptable</span></h3>
+        <p><span data-l="ru"><code>radar ctl</code> поднимает агентов, отправляет им задачи и ждёт результата из любого скрипта или CI.</span><span data-l="en"><code>radar ctl</code> starts agents, sends them tasks and waits for results from any script or CI.</span></p>
+        <div class="vis"><div class="term-snip"><span class="s">$</span> radar ctl new claude ~/work/api --name api
+<span class="s">$</span> radar ctl send api <span class="o">"Add a /health endpoint and a test"</span>
+<span class="s">$</span> radar ctl wait api
+<span class="s">$</span> radar ctl read api --lines 30</div></div>
+      </div>
+      <div class="card c2 rv">
+        <h3><span data-l="ru">12 цветовых схем</span><span data-l="en">12 color schemes</span></h3>
+        <p><span data-l="ru">Тёмные и светлые, от Catppuccin до Gruvbox. Меняются на лету.</span><span data-l="en">Dark and light, from Catppuccin to Gruvbox. Switch on the fly.</span></p>
+        <div class="vis"><div class="swatches"><i style="background:#1e1e2e"></i><i style="background:#f5c2e7"></i><i style="background:#282828"></i><i style="background:#fabd2f"></i><i style="background:#002b36"></i><i style="background:#2aa198"></i><i style="background:#fdf6e3"></i><i style="background:#f59e0b"></i></div></div>
       </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section id="keys">
-    <h2><span data-l="ru">Пять клавиш для старта</span><span data-l="en">Five keys to start</span></h2>
-    <p class="sub"><span data-l="ru">Нажмите <kbd>Ctrl+b</kbd>, и режим навигации включён до <kbd>Esc</kbd>.</span><span data-l="en">Press <kbd>Ctrl+b</kbd> and navigation mode stays on until <kbd>Esc</kbd>.</span></p>
-    <table>
-      <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td><span data-l="ru">следующий / предыдущий агент</span><span data-l="en">next / previous agent</span></td></tr>
-      <tr><td><kbd>n</kbd></td><td><span data-l="ru">новый агент</span><span data-l="en">new agent</span></td></tr>
-      <tr><td><kbd>w</kbd></td><td><span data-l="ru">к агенту, который ждёт ответа</span><span data-l="en">jump to the waiting agent</span></td></tr>
-      <tr><td><kbd>v</kbd></td><td><span data-l="ru">изменения агента (git diff)</span><span data-l="en">agent's changes (git diff)</span></td></tr>
-      <tr><td><kbd>p</kbd></td><td><span data-l="ru">палитра команд</span><span data-l="en">command palette</span></td></tr>
-    </table>
-  </section>
-
-  <section id="docs">
-    <h2><span data-l="ru">Документация</span><span data-l="en">Documentation</span></h2>
-    <p class="sub"><span data-l="ru">Короткий README и подробные разделы.</span><span data-l="en">A short README and detailed guides.</span></p>
-    <div class="docs">
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/install.md"><b>Установка</b><span>macOS, Linux, обновление</span></a>
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/usage.md"><b>Работа в интерфейсе</b><span>клавиши, мышь, группы</span></a>
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/git.md"><b>Git</b><span>diff, commit, разрешения</span></a>
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/automation.md"><b>Автоматизация</b><span>radar ctl, фон</span></a>
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/integrations.md"><b>Статусы и уведомления</b><span>хуки, интеграции</span></a>
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/config.md"><b>Настройки</b><span>config.toml, темы</span></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/install.md"><b>Install</b><span>macOS, Linux, updating</span></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/usage.md"><b>Using the UI</b><span>keys, mouse, groups</span></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/git.md"><b>Git</b><span>diff, commit, approvals</span></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/automation.md"><b>Automation</b><span>radar ctl, background</span></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/integrations.md"><b>Statuses and notifications</b><span>hooks, integrations</span></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/config.md"><b>Settings</b><span>config.toml, themes</span></a>
+<section id="how">
+  <div class="wrap">
+    <div class="lbl rv"><span data-l="ru">Как это устроено</span><span data-l="en">How it works</span></div>
+    <h2 class="rv"><span data-l="ru">Точно там, где можно, и <em>честно</em>, где нельзя</span><span data-l="en">Exact where it can be, <em>honest</em> where it can't</span></h2>
+    <p class="sub rv"><span data-l="ru">Radar не угадывает то, что агент может сказать сам.</span><span data-l="en">Radar does not guess what the agent can tell it directly.</span></p>
+    <div class="flow rv">
+      <div><div class="n">01</div><h3><span data-l="ru">Хуки агента</span><span data-l="en">Agent hooks</span></h3><p><span data-l="ru">Claude Code и Qwen Code сообщают о событиях через <code>radar hook</code> по unix-сокету: статус точный, без разбора экрана.</span><span data-l="en">Claude Code and Qwen Code report events via <code>radar hook</code> over a unix socket: exact status, no screen scraping.</span></p></div>
+      <div><div class="n">02</div><h3><span data-l="ru">Эвристика экрана</span><span data-l="en">Screen heuristics</span></h3><p><span data-l="ru">Для остальных агентов Radar разбирает терминал (vt100) и находит приглашения, спиннеры и вопросы. Хуки включаются в «Интеграциях».</span><span data-l="en">For other agents Radar parses the terminal (vt100) and finds prompts, spinners and questions. Hooks are enabled under Integrations.</span></p></div>
+      <div><div class="n">03</div><h3><span data-l="ru">Ваш ответ</span><span data-l="en">Your answer</span></h3><p><span data-l="ru">Запрос разрешения всегда показывается с текстом, ответ уходит агенту как обычное нажатие клавиши. Ничего не подтверждается вслепую.</span><span data-l="en">An approval request is always shown with its text and the answer goes to the agent as a normal keypress. Nothing is confirmed blindly.</span></p></div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <footer>
-    <span>Radar · MIT</span>
-    <span><a href="https://github.com/off-art/radar">github.com/off-art/radar</a></span>
-  </footer>
-</div>
+<section id="keys">
+  <div class="wrap">
+    <div class="lbl rv"><span data-l="ru">Клавиши</span><span data-l="en">Keys</span></div>
+    <h2 class="rv"><span data-l="ru">Один префикс, <em>никаких мышей</em></span><span data-l="en">One prefix, <em>no mouse needed</em></span></h2>
+    <p class="sub rv"><span data-l="ru">Нажмите <kbd style="font:600 13px var(--mono);background:var(--bg3);border:1px solid var(--line2);border-bottom-width:2px;border-radius:6px;padding:2px 7px">Ctrl+b</kbd> и режим навигации включён. Нажмите кнопку с подписью «показать», чтобы увидеть действие в демо выше.</span><span data-l="en">Press <kbd style="font:600 13px var(--mono);background:var(--bg3);border:1px solid var(--line2);border-bottom-width:2px;border-radius:6px;padding:2px 7px">Ctrl+b</kbd> to enter navigation mode. Press a key marked "show" to see it in the demo above.</span></p>
+    <div class="keys rv" id="keygrid">
+      <div class="k"><kbd>j / k</kbd><span><span data-l="ru">следующий / предыдущий агент</span><span data-l="en">next / previous agent</span></span></div>
+      <div class="k"><kbd>n</kbd><span><span data-l="ru">новый агент</span><span data-l="en">new agent</span></span></div>
+      <button type="button" class="k" data-scene="approve"><kbd>w</kbd><span><span data-l="ru">к агенту, который ждёт ответа</span><span data-l="en">jump to the waiting agent</span><em>▶ <span data-l="ru">показать</span><span data-l="en">show</span></em></span></button>
+      <button type="button" class="k" data-scene="approve"><kbd>y</kbd><span><span data-l="ru">разрешить запрос из списка</span><span data-l="en">approve a request from the list</span><em>▶ <span data-l="ru">показать</span><span data-l="en">show</span></em></span></button>
+      <button type="button" class="k" data-scene="diff"><kbd>v</kbd><span><span data-l="ru">изменения агента (git diff)</span><span data-l="en">agent's changes (git diff)</span><em>▶ <span data-l="ru">показать</span><span data-l="en">show</span></em></span></button>
+      <button type="button" class="k" data-scene="grid"><kbd>g</kbd><span><span data-l="ru">сетка: все агенты сразу</span><span data-l="en">grid: all agents at once</span><em>▶ <span data-l="ru">показать</span><span data-l="en">show</span></em></span></button>
+      <button type="button" class="k" data-scene="log"><kbd>l</kbd><span><span data-l="ru">лента событий</span><span data-l="en">event feed</span><em>▶ <span data-l="ru">показать</span><span data-l="en">show</span></em></span></button>
+      <div class="k"><kbd>p</kbd><span><span data-l="ru">палитра команд</span><span data-l="en">command palette</span></span></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="lbl rv"><span data-l="ru">Установка</span><span data-l="en">Install</span></div>
+    <h2 class="rv"><span data-l="ru">Одна команда. <em>Одна минута.</em></span><span data-l="en">One command. <em>One minute.</em></span></h2>
+    <p class="sub rv"><span data-l="ru">macOS (Apple Silicon и Intel) и Linux (x86_64, aarch64). Скрипт кладёт бинарник в <code class="mono">~/.local/bin</code>.</span><span data-l="en">macOS (Apple Silicon and Intel) and Linux (x86_64, aarch64). The script puts the binary in <code class="mono">~/.local/bin</code>.</span></p>
+    <div class="inst">
+      <div class="card rv">
+        <h3><span data-l="ru">Скрипт</span><span data-l="en">Script</span></h3>
+        <div class="term-snip"><span class="s">$</span> curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash<button type="button" class="copy copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
+        <p><span data-l="ru">Берёт последний релиз под вашу систему.</span><span data-l="en">Takes the latest release for your system.</span></p>
+      </div>
+      <div class="card rv" style="--d:.08s">
+        <h3><span data-l="ru">Из исходников</span><span data-l="en">From source</span></h3>
+        <div class="term-snip"><span class="s">$</span> git clone https://github.com/off-art/radar
+<span class="s">$</span> cd radar &amp;&amp; ./install.sh<button type="button" class="copy copy-btn" data-copy="git clone https://github.com/off-art/radar && cd radar && ./install.sh"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
+        <p><span data-l="ru">Нужен Rust. Первая сборка около двух минут.</span><span data-l="en">Needs Rust. The first build takes about two minutes.</span></p>
+      </div>
+      <div class="card rv" style="--d:.16s">
+        <h3><span data-l="ru">Обновление</span><span data-l="en">Updating</span></h3>
+        <div class="term-snip"><span class="s">$</span> radar update<button type="button" class="copy copy-btn" data-copy="radar update"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
+        <p><span data-l="ru">Агенты в фоне продолжают работать.</span><span data-l="en">Background agents keep running.</span></p>
+      </div>
+    </div>
+    <div class="after rv"><b>radar doctor</b> <span data-l="ru">— какие агенты найдены</span><span data-l="en">— which agents were found</span> &nbsp;·&nbsp; <b>radar notify-test</b> <span data-l="ru">— проверка уведомлений</span><span data-l="en">— notifications check</span> &nbsp;·&nbsp; <b>radar integration install all</b> <span data-l="ru">— хуки для всех агентов</span><span data-l="en">— hooks for all agents</span></div>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="wrap">
+    <div class="lbl rv"><span data-l="ru">Документация</span><span data-l="en">Documentation</span></div>
+    <h2 class="rv"><span data-l="ru">Короткий README, <em>подробные разделы</em></span><span data-l="en">A short README, <em>detailed guides</em></span></h2>
+    <p class="sub rv"><span data-l="ru">Всё на русском и английском.</span><span data-l="en">Everything in Russian and English.</span></p>
+    <div class="docs rv">
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/install.md"><div><b>Установка</b><small>macOS, Linux, обновление</small></div><i>→</i></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/usage.md"><div><b>Работа в интерфейсе</b><small>клавиши, мышь, группы</small></div><i>→</i></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/git.md"><div><b>Git</b><small>diff, commit, разрешения</small></div><i>→</i></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/automation.md"><div><b>Автоматизация</b><small>radar ctl, фон</small></div><i>→</i></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/integrations.md"><div><b>Статусы и уведомления</b><small>хуки, интеграции</small></div><i>→</i></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/config.md"><div><b>Настройки</b><small>config.toml, темы</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/install.md"><div><b>Install</b><small>macOS, Linux, updating</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/usage.md"><div><b>Using the UI</b><small>keys, mouse, groups</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/git.md"><div><b>Git</b><small>diff, commit, approvals</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/automation.md"><div><b>Automation</b><small>radar ctl, background</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/integrations.md"><div><b>Statuses and notifications</b><small>hooks, integrations</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/config.md"><div><b>Settings</b><small>config.toml, themes</small></div><i>→</i></a>
+    </div>
+
+    <div class="final rv">
+      <h2><span data-l="ru">Откройте один терминал. <em>Запустите всех.</em></span><span data-l="en">Open one terminal. <em>Run them all.</em></span></h2>
+      <p class="sub"><span data-l="ru">Бесплатно, с открытым кодом, без аккаунта.</span><span data-l="en">Free, open source, no account.</span></p>
+      <div class="cta"><a class="btn primary" href="#install"><span data-l="ru">Установить Radar</span><span data-l="en">Install Radar</span> →</a><a class="btn" href="https://github.com/off-art/radar">GitHub</a></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span style="display:inline-flex;align-items:center;gap:14px"><img class="logo-d" src="brand/radar-wordmark-on-dark.svg" alt="radar_"><span>MIT</span></span>
+    <span><a href="https://github.com/off-art/radar">GitHub</a><a href="https://github.com/off-art/radar/releases">Releases</a><a href="https://github.com/off-art/radar/blob/main/ROADMAP.md">Roadmap</a></span>
+  </div>
+</footer>
 
 <script>
 (function () {
-  var root = document.documentElement;
-  function setLang(l) {
-    root.lang = l;
+  var root = document.documentElement, lang = 'ru';
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function L(ru, en) { return lang === 'ru' ? ru : en; }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function $(id) { return document.getElementById(id); }
+
+  /* ───────── язык и тема ───────── */
+  function setLang(l, silent) {
+    lang = l; root.lang = l;
     document.querySelectorAll('[data-l]').forEach(function (el) { el.classList.toggle('on', el.dataset.l === l); });
     document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.set === l)); });
     try { localStorage.setItem('radar-lang', l); } catch (e) {}
+    if (!silent) { buildScenes(); play(cur, true); }
   }
+  var theme = null;
+  try { theme = localStorage.getItem('radar-theme'); } catch (e) {}
+  if (theme) root.dataset.theme = theme;
+  function syncLogo() {
+    var light = root.dataset.theme === 'light' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: light)').matches);
+    document.querySelectorAll('.logo-d').forEach(function (i) { i.src = light ? 'brand/radar-wordmark-on-light.svg' : 'brand/radar-wordmark-on-dark.svg'; });
+  }
+  $('theme').addEventListener('click', function () {
+    var light = root.dataset.theme === 'light' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: light)').matches);
+    root.dataset.theme = light ? 'dark' : 'light';
+    try { localStorage.setItem('radar-theme', root.dataset.theme); } catch (e) {}
+    syncLogo();
+  });
+  syncLogo();
+  document.querySelectorAll('.seg button').forEach(function (b) { b.addEventListener('click', function () { setLang(b.dataset.set); }); });
+
+  /* ───────── копирование ───────── */
+  document.querySelectorAll('.copy-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = b.dataset.copy || document.querySelector('.cmd code').textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(t).catch(function () {});
+      var old = b.innerHTML; b.textContent = '✓';
+      setTimeout(function () { b.innerHTML = old; }, 1200);
+    });
+  });
+
+  /* ───────── навигация, появление, подсветка карточек ───────── */
+  var nav = $('nav');
+  addEventListener('scroll', function () { nav.classList.toggle('stuck', scrollY > 8); }, { passive: true });
+  var els = document.querySelectorAll('.rv');
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }); }, { threshold: .12, rootMargin: '0px 0px -6% 0px' });
+    els.forEach(function (e) { io.observe(e); });
+  } else { els.forEach(function (e) { e.classList.add('in'); }); }
+  document.querySelectorAll('.card').forEach(function (c) {
+    c.addEventListener('pointermove', function (e) { var r = c.getBoundingClientRect(); c.style.setProperty('--mx', (e.clientX - r.left) + 'px'); c.style.setProperty('--my', (e.clientY - r.top) + 'px'); });
+  });
+
+  /* бегущая строка */
+  var names = ['Claude Code', 'Codex', 'OpenCode', 'Qwen Code', 'GigaCode', 'Gemini CLI', 'shell'];
+  $('track').innerHTML = names.concat(names, names, names).map(function (n) { return '<span>' + n + '</span>'; }).join('');
+
+  /* версия из GitHub Releases */
+  try {
+    fetch('https://api.github.com/repos/off-art/radar/releases/latest').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (j && j.tag_name) $('vertxt').textContent = j.tag_name + ' · open source · MIT';
+    }).catch(function () {});
+  } catch (e) {}
+
+  /* ───────── интерактивное демо ───────── */
+  var DATA = {
+    api:  { name: 'api',  ag: 'Claude Code', br: 'feat/health', df: '●2 +13 −1' },
+    web:  { name: 'web',  ag: 'Codex',       br: 'feat/login',  df: '●2 +9 −0' },
+    docs: { name: 'docs', ag: 'Qwen Code',   br: 'docs/readme', df: '●1 +6 −0' }
+  };
+  var order = ['api', 'web', 'docs'];
+  var S; // состояние: {st:{api,web,docs}, sel, lines:{...}, time:{...}, note:{...}, overlay, view, toast, nav}
+  function fresh() {
+    S = { st: { api: 'work', web: 'work', docs: 'work' }, sel: 'api', time: { api: '0:12', web: '0:09', docs: '0:07' }, lines: { api: [], web: [], docs: [] }, note: '', overlay: '', view: 'single', toast: '', nav: false, menu: false };
+  }
+  function linesFor(k) {
+    var T = {
+      api: [
+        ['p', '❯ ' + L('Добавь эндпоинт /health и тест', 'Add a /health endpoint and a test')],
+        ['dm', '● Read(src/server.ts)'], ['dm', '● Update(src/server.ts)  +6 −1'], ['dm', '● Write(test/health.test.ts)'], ['dm', '● Bash(npm test)'], ['ad', '  ✓ 12 passed'], ['ad', '✓ ' + L('Готово.', 'Done.')]
+      ],
+      web: [
+        ['p', '❯ ' + L('Добавь состояние загрузки в форму входа', 'Add a loading state to the login form')],
+        ['dm', '● Read(src/Login.tsx)'], ['dm', '● Update(src/Login.tsx)  +5 −0'], ['dm', '● Write(src/useLogin.ts)'], ['dm', '● Bash(npx tsc --noEmit)'], ['ad', '  ✓ no errors'], ['ad', '✓ ' + L('Готово.', 'Done.')]
+      ],
+      docs: [
+        ['p', '❯ ' + L('Обнови README', 'Update the README')],
+        ['dm', '● Read(README.md)'], ['dm', '● Update(README.md)  +5 −0']
+      ]
+    };
+    return T[k];
+  }
+  function row(k) {
+    var d = DATA[k], st = S.st[k], sel = S.sel === k ? ' sel' : '';
+    var stx = st === 'work' ? '<span class="st work">' + S.time[k] + '</span>' : st === 'wait' ? '<span class="st wait">○ ' + L('ждёт ответа', 'waiting') + '</span>' : '<span class="st done">✓ ' + S.time[k] + '</span>';
+    var extra = st === 'wait' ? '<div class="l3">' + esc(S.note) + '</div><div class="l3 hint">y — ' + L('разрешить', 'approve') + '</div>' : '';
+    return '<div class="row' + sel + '"><div class="l1"><b>' + d.name + '</b>' + stx + '</div><div class="l2">' + d.ag + ' · ⎇ ' + d.br + ' ' + d.df + '</div>' + extra + '</div>';
+  }
+  function cls(c, t) { return '<div class="ln ' + c + '">' + esc(t) + '</div>'; }
+  function mainHtml() {
+    if (S.view === 'grid') {
+      return '<div class="grid3">' + order.map(function (k) {
+        var ls = S.lines[k].slice(-6);
+        return '<div class="tile' + (S.sel === k ? ' sel' : '') + '"><h5><span>' + DATA[k].name + '</span><span class="st ' + S.st[k] + '">' + (S.st[k] === 'work' ? '' : S.st[k] === 'wait' ? '○' : '✓') + '</span></h5>' + ls.map(function (l) { return cls(l[0], l[1]); }).join('') + '</div>';
+      }).join('') + '</div>';
+    }
+    var html = S.lines[S.sel].map(function (l) { return cls(l[0], l[1]); }).join('');
+    if (S.menu) {
+      html += '<div class="ln"> </div>' + cls('', '  Bash command') + cls('', '    rm -rf dist') + cls('', ' ') + cls('', '  Do you want to proceed?') +
+        '<div class="ln menu"><span class="sel">❯ 1. Yes</span></div>' + cls('', '  2. Yes, and don\'t ask again for rm commands') + cls('dm', '  3. No, and tell the agent what to do differently (esc)');
+    }
+    return html;
+  }
+  function overlayHtml() {
+    if (S.overlay === 'approve') {
+      return '<div class="overlay"><div class="box"><div class="bt">' + L('Подтверждение', 'Confirm') + '</div><div class="bb"><div class="ye">Qwen Code · docs ' + L('просит разрешение', 'asks for permission') + '</div><div style="margin-top:6px"><b>Bash: rm -rf dist</b></div><div class="dm" style="margin-top:6px">❯ 1. Yes</div></div><div class="ac"><span><span class="key">Enter</span> ' + L('Подтвердить', 'Confirm') + '</span><span><span class="key g">Esc</span> ' + L('Отмена', 'Cancel') + '</span></div></div></div>';
+    }
+    if (S.overlay === 'diff') {
+      var rows = [['dfile', 'M README.md   +6 −0'], ['', ' '], ['hunk', '@@ -1,3 +1,9 @@'], ['', ' # Docs'], ['', ' '], ['', ' ' + L('Проект документации.', 'Project documentation.')], ['ad', '+'], ['ad', '+## ' + L('Быстрый старт', 'Quick start')], ['ad', '+'], ['ad', '+```sh'], ['ad', '+radar ~/work/api claude'], ['ad', '+```']];
+      return '<div class="overlay"><div class="box wide"><div class="bt">' + L('Изменения — docs · Qwen Code', 'Changes — docs · Qwen Code') + '</div><div class="bb">' + rows.map(function (r) { return cls(r[0], r[1]); }).join('') + '</div><div class="bt dm" style="border-top:1px solid #2a3547;border-bottom:0">j/k · n/p · c — commit · P — push · Esc</div></div></div>';
+    }
+    if (S.overlay === 'log') {
+      var ev = [['✓', 'Qwen Code', L('docs: закончил за 0:11', 'docs: finished in 0:11'), 'ad'], ['✓', 'Codex', L('web: закончил за 0:08', 'web: finished in 0:08'), 'ad'], ['?', 'Qwen Code', L('docs: ждёт ответа: Bash: rm -rf dist', 'docs: waiting: Bash: rm -rf dist'), 'ye'], ['▶', 'Claude Code', L('api: запущен', 'api: started'), 'bl'], ['▶', 'Codex', L('web: запущен', 'web: started'), 'bl'], ['▶', 'Qwen Code', L('docs: запущен', 'docs: started'), 'bl']];
+      return '<div class="overlay"><div class="box"><div class="bt">' + L('Лента событий', 'Event feed') + '</div><div class="bb">' + ev.map(function (e, i) { return '<div class="ln ' + e[3] + '" style="animation-delay:' + (i * .08) + 's">' + e[0] + ' ' + esc(e[1]) + ' · ' + esc(e[2]) + '</div>'; }).join('') + '</div></div></div>';
+    }
+    return '';
+  }
+  function statusHtml() {
+    var n = order.filter(function (k) { return S.st[k] === 'work'; }).length, d = order.filter(function (k) { return S.st[k] === 'done'; }).length;
+    var left = S.nav ? '<span class="nav">' + L('НАВИГАЦИЯ', 'NAV') + '</span>' : '<span>Ctrl+b ' + L('навигация', 'navigation') + '</span>';
+    var right = S.toast ? '<span class="toast">' + esc(S.toast) + '</span>' : '<span>' + L('в списке: 3 · работают: ', 'agents: 3 · working: ') + n + ' · ' + L('готовы: ', 'done: ') + d + '</span>';
+    return left + right;
+  }
+  function render() {
+    $('side').innerHTML = '<div class="hd"><b>radar<span style="color:#f59e0b">_</span></b><span>' + L('3 в списке', '3 agents') + '</span></div>' + order.map(row).join('');
+    $('main').innerHTML = mainHtml();
+    $('overlay').innerHTML = overlayHtml();
+    $('tstatus').innerHTML = statusHtml();
+  }
+  function press() {
+    var kc = $('keycap'); kc.innerHTML = '';
+    Array.prototype.slice.call(arguments).forEach(function (k, i) {
+      setTimeout(function () { var s = document.createElement('span'); s.textContent = k; kc.appendChild(s); setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 950); }, i * 420);
+    });
+  }
+
+  var token = 0, cur = 0, timer = null;
+  var SCENES = [
+    { id: 'status', key: 'Ctrl+b', ru: 'Статусы', en: 'Statuses', dur: 9 },
+    { id: 'approve', key: 'y', ru: 'Запрос разрешения', en: 'Approval', dur: 12 },
+    { id: 'diff', key: 'v', ru: 'Diff', en: 'Diff', dur: 8 },
+    { id: 'grid', key: 'g', ru: 'Сетка', en: 'Grid', dur: 7 },
+    { id: 'log', key: 'l', ru: 'Лента', en: 'Feed', dur: 7 }
+  ];
+  function sleeper(my) { return function (ms) { return new Promise(function (res, rej) { setTimeout(function () { my === token ? res() : rej('x'); }, ms); }); }; }
+  function addLine(k, i) { var ls = linesFor(k); if (ls[i]) S.lines[k].push(ls[i]); }
+
+  var scripts = {
+    status: async function (w) {
+      fresh(); render();
+      for (var i = 0; i < 4; i++) { addLine('api', i); addLine('web', i); if (i < 3) addLine('docs', i); render(); await w(600); }
+      S.toast = L('Codex web — закончил работу', 'Codex web — finished'); S.st.web = 'done'; S.time.web = '0:08'; addLine('web', 4); addLine('web', 5); addLine('web', 6); render(); await w(1700);
+      S.toast = ''; addLine('api', 4); addLine('api', 5); render(); await w(1000);
+      S.st.api = 'done'; S.time.api = '0:11'; addLine('api', 6); S.toast = L('Claude Code api — закончил работу', 'Claude Code api — finished'); render(); await w(1800);
+    },
+    approve: async function (w) {
+      fresh(); S.st.api = 'done'; S.st.web = 'done'; S.lines.api = linesFor('api'); S.lines.web = linesFor('web'); S.time.api = '0:11'; S.time.web = '0:08';
+      for (var i = 0; i < 3; i++) addLine('docs', i); render(); await w(900);
+      S.st.docs = 'wait'; S.note = 'Bash: rm -rf dist'; S.toast = L('Qwen Code docs — ждёт ответа', 'Qwen Code docs — waiting'); S.menu = true; render(); await w(1700);
+      S.toast = ''; press('Ctrl+b', 'w'); await w(700); S.nav = true; S.sel = 'docs'; render(); await w(1300);
+      press('y'); await w(450); S.overlay = 'approve'; S.nav = false; render(); await w(2600);
+      press('Enter'); await w(350); S.overlay = ''; S.menu = false; S.st.docs = 'work'; S.toast = L('Разрешено: Bash: rm -rf dist', 'Approved: Bash: rm -rf dist'); render(); await w(1500);
+      S.toast = ''; S.lines.docs.push(['dm', '● Bash(npm run build:docs)']); render(); await w(900);
+      S.lines.docs.push(['ad', '  ✓ done']); S.lines.docs.push(['ad', '✓ ' + L('Готово.', 'Done.')]); S.st.docs = 'done'; S.time.docs = '0:12'; render(); await w(1200);
+    },
+    diff: async function (w) {
+      fresh(); S.st = { api: 'done', web: 'done', docs: 'done' }; S.lines = { api: linesFor('api'), web: linesFor('web'), docs: linesFor('docs') }; S.sel = 'docs'; S.time = { api: '0:11', web: '0:08', docs: '0:12' }; render(); await w(900);
+      press('Ctrl+b', 'v'); await w(900); S.overlay = 'diff'; render(); await w(5000);
+      press('Esc'); await w(400); S.overlay = ''; render(); await w(800);
+    },
+    grid: async function (w) {
+      fresh(); S.st = { api: 'done', web: 'done', docs: 'done' }; S.lines = { api: linesFor('api'), web: linesFor('web'), docs: linesFor('docs') }; S.time = { api: '0:11', web: '0:08', docs: '0:12' }; S.sel = 'api'; render(); await w(800);
+      press('Ctrl+b', 'g'); await w(900); S.nav = true; S.view = 'grid'; render(); await w(2200);
+      press('j'); await w(450); S.sel = 'web'; render(); await w(1700);
+      press('g'); await w(450); S.view = 'single'; render(); await w(1400);
+    },
+    log: async function (w) {
+      fresh(); S.st = { api: 'done', web: 'done', docs: 'done' }; S.lines = { api: linesFor('api'), web: linesFor('web'), docs: linesFor('docs') }; S.time = { api: '0:11', web: '0:08', docs: '0:12' }; render(); await w(800);
+      press('Ctrl+b', 'l'); await w(900); S.overlay = 'log'; render(); await w(4300);
+      press('Esc'); await w(400); S.overlay = ''; render(); await w(900);
+    }
+  };
+
+  function buildScenes() {
+    $('scenes').innerHTML = SCENES.map(function (s, i) {
+      return '<button type="button" class="scene" data-i="' + i + '" aria-pressed="' + (i === cur) + '" style="--dur:' + s.dur + 's"><kbd>' + s.key + '</kbd>' + L(s.ru, s.en) + '</button>';
+    }).join('');
+    document.querySelectorAll('.scene').forEach(function (b) { b.addEventListener('click', function () { play(+b.dataset.i, true, true); }); });
+  }
+  function play(i, manual, stay) {
+    cur = i; var my = ++token;
+    document.querySelectorAll('.scene').forEach(function (b, j) { b.setAttribute('aria-pressed', String(j === i)); if (j === i) { b.style.animation = 'none'; void b.offsetWidth; b.style.animation = ''; } });
+    if (reduce) { scripts[SCENES[i].id](function () { return Promise.resolve(); }).catch(function () {}); return; }
+    scripts[SCENES[i].id](sleeper(my)).then(function () {
+      if (my !== token) return;
+      if (stay && !auto) return;
+      play((i + 1) % SCENES.length);
+    }).catch(function () {});
+  }
+  var auto = true, visible = false;
+  buildScenes(); fresh(); render();
+
   var saved = null;
   try { saved = localStorage.getItem('radar-lang'); } catch (e) {}
-  var initial = saved || ((navigator.language || 'ru').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en');
-  document.querySelectorAll('.seg button').forEach(function (b) { b.addEventListener('click', function () { setLang(b.dataset.set); }); });
-  setLang(initial);
+  setLang(saved || ((navigator.language || 'ru').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en'), true);
+  buildScenes(); fresh(); render();
 
-  document.getElementById('copy').addEventListener('click', function () {
-    var t = document.getElementById('cmd').textContent;
-    if (navigator.clipboard) navigator.clipboard.writeText(t).catch(function () {});
+  /* запускаем демо, когда его видно; ставим на паузу, когда нет */
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var v = es[0].isIntersecting;
+      if (v && !visible) { visible = true; play(cur); }
+      if (!v && visible) { visible = false; token++; }
+    }, { threshold: .25 }).observe($('demo'));
+  } else { play(0); }
+
+  /* кнопки в разделе «Клавиши» запускают сцену и ведут к демо */
+  document.querySelectorAll('[data-scene]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var i = SCENES.map(function (s) { return s.id; }).indexOf(b.dataset.scene);
+      $('demo').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+      setTimeout(function () { visible = true; play(i, true, true); }, reduce ? 0 : 450);
+    });
   });
 })();
 </script>
