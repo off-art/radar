@@ -648,8 +648,6 @@ fn is_frame_char(c: char) -> bool {
     c.is_whitespace() || ('\u{2500}'..='\u{257F}').contains(&c)
 }
 
-/// Из строк экрана выбирает вопрос с вариантами: вокруг последнего списка «1. …».
-/// Рамки и пустые строки отбрасываются; если списка нет — берутся последние строки.
 /// Номер варианта в начале строки («› 2. …» → 2) и отмечена ли строка маркером выбора.
 fn option_number(line: &str) -> Option<(usize, bool)> {
     const MARKS: &str = "›❯>●○→";
@@ -681,15 +679,12 @@ pub fn option_lines(excerpt: &[String]) -> (Vec<usize>, Option<usize>) {
     (idx, hi)
 }
 
+/// Из строк экрана выбирает вопрос с вариантами: вокруг последнего списка «1. …».
+/// Рамки и пустые строки отбрасываются; если списка нет — берутся последние строки.
 pub fn excerpt(rows: &[String]) -> Vec<String> {
     let lines: Vec<String> =
         rows.iter().map(|r| r.trim_matches(is_frame_char).to_string()).filter(|r| !r.is_empty()).collect();
-    let first_option = |s: &String| {
-        let t = s.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
-        let digits: String = t.chars().take_while(char::is_ascii_digit).collect();
-        digits == "1" && t[1..].starts_with(['.', ')'])
-    };
-    let (start, end) = match lines.iter().rposition(first_option) {
+    let (start, end) = match lines.iter().rposition(|l| option_number(l).is_some_and(|(n, _)| n == 1)) {
         Some(i) => {
             // вверх — до эха пользовательского запроса («> …») или ответа агента («● …»)
             let mut start = i;

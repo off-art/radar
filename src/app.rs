@@ -443,6 +443,17 @@ impl App {
         }
     }
 
+    /// Группы, свёрнутость и выбранный агент из сохранённого списка.
+    fn apply_saved_layout(&mut self, saved: &crate::persist::File) {
+        self.groups = saved.groups.clone();
+        self.collapsed = saved.collapsed.iter().cloned().collect();
+        if !self.sessions.is_empty() {
+            self.selected = saved.selected.min(self.sessions.len() - 1);
+            let id = self.sessions[self.selected].id;
+            self.normalize_groups(id);
+        }
+    }
+
     /// Подключается к агентам, которые продолжали работать в фоне после закрытия Radar.
     /// Возвращает, сколько фоновых агентов найдено (включая занятых другим окном).
     pub fn attach_existing(&mut self) -> usize {
@@ -470,13 +481,7 @@ impl App {
             s.group = saved.sessions.iter().find(|sv| sv.name == s.name).and_then(|sv| sv.group.clone());
             self.sessions.push(s);
         }
-        self.groups = saved.groups.clone();
-        self.collapsed = saved.collapsed.iter().cloned().collect();
-        if !self.sessions.is_empty() {
-            self.selected = saved.selected.min(self.sessions.len() - 1);
-            let id = self.sessions[self.selected].id;
-            self.normalize_groups(id);
-        }
+        self.apply_saved_layout(&saved);
         if busy > 0 {
             self.toast(format!("Агентов в другом окне Radar: {busy} — они здесь не показаны"));
         } else if unknown > 0 {
@@ -512,13 +517,7 @@ impl App {
                 Err(_) => failed += 1,
             }
         }
-        self.groups = saved.groups.clone();
-        self.collapsed = saved.collapsed.iter().cloned().collect();
-        if !self.sessions.is_empty() {
-            self.selected = saved.selected.min(self.sessions.len() - 1);
-            let id = self.sessions[self.selected].id;
-            self.normalize_groups(id);
-        }
+        self.apply_saved_layout(&saved);
         if failed > 0 {
             self.toast(format!("Не удалось восстановить агентов: {failed} (папка удалена или агент убран из конфига)"));
         }
