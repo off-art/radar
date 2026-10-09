@@ -50,11 +50,18 @@ def write_icns(path, pngs):
 
 
 def svg_png_bytes(page, svg_path, size):
+    # страница должна лежать рядом с SVG и открываться по file://: из about:blank файл не подгружается
+    html = os.path.join(os.path.dirname(svg_path), "_icon.html")
+    open(html, "w", encoding="utf-8").write(
+        f'<!doctype html><body style="margin:0;background:transparent">'
+        f'<img src="{os.path.basename(svg_path)}" width="{size}" height="{size}" style="display:block"></body>'
+    )
     page.set_viewport_size({"width": size, "height": size})
-    page.set_content(f'<body style="margin:0;background:transparent"><img src="file://{svg_path}" '
-                     f'width="{size}" height="{size}" style="display:block"></body>')
-    page.wait_for_timeout(120)
-    return page.screenshot(omit_background=True)
+    page.goto("file://" + html)
+    page.wait_for_function("document.images[0].complete && document.images[0].naturalWidth > 0")
+    out = page.screenshot(omit_background=True)
+    os.remove(html)
+    return out
 
 
 with sync_playwright() as p:
