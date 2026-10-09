@@ -8,6 +8,7 @@ use ratatui::style::Color;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -49,7 +50,16 @@ pub struct SpawnCtx {
 
 /// Сколько строк истории прокрутки хранит окно на каждого агента.
 /// Память: около 15 МБ на агента при ширине 100 колонок (и ~29 МБ при 200) на полностью заполненной истории.
-const SCROLLBACK_LINES: usize = 5000;
+static SCROLLBACK_LINES: AtomicUsize = AtomicUsize::new(crate::config::DEFAULT_SCROLLBACK);
+
+/// Задаёт глубину прокрутки для новых экранов агентов (из `scrollback` в config.toml).
+pub fn set_scrollback(lines: usize) {
+    SCROLLBACK_LINES.store(lines, Ordering::Relaxed);
+}
+
+fn scrollback_lines() -> usize {
+    SCROLLBACK_LINES.load(Ordering::Relaxed)
+}
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
@@ -175,7 +185,7 @@ pub fn feed(parser: &mut vt100::Parser, data: &[u8]) {
         parser.process(&rest[..end]);
         let (rows, cols) = parser.screen().size();
         let screen = parser.screen().state_formatted();
-        *parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
+        *parser = vt100::Parser::new(rows, cols, scrollback_lines());
         parser.process(&screen);
         rest = &rest[end..];
     }
@@ -269,7 +279,7 @@ impl Session {
     pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Result<Session> {
         let id = meta.id;
         let (rows, cols) = (meta.rows, meta.cols);
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, SCROLLBACK_LINES)));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, scrollback_lines())));
         let conn = Arc::new(Mutex::new(stream.try_clone().context("клонирование сокета")?));
         let writer: Writer = Arc::new(Mutex::new(Box::new(FrameWriter(conn.clone()))));
         {

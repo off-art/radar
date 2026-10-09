@@ -91,11 +91,15 @@ struct RawConfig {
     sound_waiting: Option<String>,
     mouse: Option<bool>,
     sidebar_width: Option<u16>,
+    scrollback: Option<usize>,
     theme: Option<RawTheme>,
     keys: Option<RawKeys>,
     #[serde(default)]
     agent: Vec<RawAgent>,
 }
+
+/// Глубина прокрутки назад по умолчанию, строк на агента.
+pub const DEFAULT_SCROLLBACK: usize = 5000;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -116,6 +120,8 @@ pub struct Config {
     pub mouse: bool,
     /// Ширина списка агентов; 0 — автоматически.
     pub sidebar_width: u16,
+    /// Глубина прокрутки назад в строках на агента (память ≈ строки × ширина окна).
+    pub scrollback: usize,
     pub theme_name: String,
     pub theme_custom: BTreeMap<String, String>,
     pub keys: Keys,
@@ -198,6 +204,7 @@ impl Config {
             sound_waiting: None,
             mouse: true,
             sidebar_width: 0,
+            scrollback: DEFAULT_SCROLLBACK,
             theme_name: crate::theme::DEFAULT.to_string(),
             theme_custom: BTreeMap::new(),
             keys: Keys::default(),
@@ -229,6 +236,7 @@ impl Config {
         cfg.sound_done = raw.sound_done.map(|p| crate::paths::expand_tilde(&p));
         cfg.sound_waiting = raw.sound_waiting.map(|p| crate::paths::expand_tilde(&p));
         cfg.sidebar_width = raw.sidebar_width.unwrap_or(0);
+        cfg.scrollback = raw.scrollback.unwrap_or(DEFAULT_SCROLLBACK).clamp(100, 100_000);
         if let Some(t) = raw.theme {
             if let Some(n) = t.name {
                 cfg.theme_name = n;
@@ -377,6 +385,9 @@ mouse = true
 # Ширина списка агентов в колонках (0 — автоматически)
 sidebar_width = 0
 
+# Глубина прокрутки назад (строк на агента). Память ≈ строки × ширина окна × ~30 байт: 5000 строк при 100 колонках ≈ 15 МБ
+scrollback = 5000
+
 # Цветовая схема (меняется и в интерфейсе: Ctrl+b, затем «,» — Настройки).
 # radar, terminal (палитра вашего терминала), catppuccin, catppuccin-latte, tokyo-night, tokyo-night-day,
 # gruvbox, dracula, nord, one-dark, solarized-dark, solarized-light
@@ -455,6 +466,12 @@ mod tests {
         let k = raw.keys.unwrap();
         assert_eq!(k.prefix.as_deref(), Some("ctrl+a"));
         assert_eq!(k.direct.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn example_scrollback_is_default() {
+        let raw: RawConfig = toml::from_str(EXAMPLE).unwrap();
+        assert_eq!(raw.scrollback, Some(DEFAULT_SCROLLBACK));
     }
 
     #[test]

@@ -215,6 +215,7 @@ pub use run::run;
 
 impl App {
     pub fn new(cfg: Config, start_dir: PathBuf, tx: Sender<Msg>, ctx: SpawnCtx) -> App {
+        crate::session::set_scrollback(cfg.scrollback);
         let notifications = cfg.notifications;
         let theme = cfg.theme();
         let mut app = App {
