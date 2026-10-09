@@ -117,16 +117,12 @@ pub struct Config {
     pub warnings: Vec<String>,
 }
 
-pub fn config_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".config").join("radar")
-}
-
 pub fn config_path() -> PathBuf {
-    std::env::var_os("RADAR_CONFIG").map_or_else(|| config_dir().join("config.toml"), PathBuf::from)
+    std::env::var_os("RADAR_CONFIG").map_or_else(|| crate::paths::config_dir().join("config.toml"), PathBuf::from)
 }
 
 fn state_path() -> PathBuf {
-    config_dir().join("state.toml")
+    crate::paths::config_dir().join("state.toml")
 }
 
 #[derive(Deserialize, Default)]
@@ -223,8 +219,8 @@ impl Config {
         }
         cfg.mouse = raw.mouse.unwrap_or(true);
         cfg.volume = raw.volume.unwrap_or(0.6).clamp(0.0, 1.0);
-        cfg.sound_done = raw.sound_done.map(|p| crate::app::expand_tilde(&p));
-        cfg.sound_waiting = raw.sound_waiting.map(|p| crate::app::expand_tilde(&p));
+        cfg.sound_done = raw.sound_done.map(|p| crate::paths::expand_tilde(&p));
+        cfg.sound_waiting = raw.sound_waiting.map(|p| crate::paths::expand_tilde(&p));
         cfg.sidebar_width = raw.sidebar_width.unwrap_or(0);
         if let Some(t) = raw.theme {
             if let Some(n) = t.name {

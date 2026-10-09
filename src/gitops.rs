@@ -8,6 +8,21 @@ use std::time::Duration;
 const SHORT: Duration = Duration::from_secs(30);
 const LONG: Duration = Duration::from_secs(90);
 
+/// Создаёт отдельный worktree с новой веткой `radar/<агент>-<метка>`, чтобы агенты не мешали друг другу.
+pub fn add_worktree(dir: &Path, agent_id: &str) -> Result<PathBuf, String> {
+    let top = exec(dir, &["rev-parse", "--show-toplevel"], SHORT).map_err(|_| "папка не в git-репозитории")?;
+    let top = PathBuf::from(top);
+    let repo = top.file_name().map_or_else(|| "repo".into(), |s| s.to_string_lossy().to_string());
+    let stamp =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
+    let slug = format!("{agent_id}-{stamp}");
+    let base = crate::paths::worktrees_dir();
+    std::fs::create_dir_all(&base).map_err(|e| format!("не удалось создать {}: {e}", base.display()))?;
+    let path = base.join(format!("{repo}-{slug}"));
+    exec(&top, &["worktree", "add", "-b", &format!("radar/{slug}"), &path.to_string_lossy()], SHORT)?;
+    Ok(path)
+}
+
 /// Добавляет все изменения и делает коммит.
 pub fn commit(dir: &Path, message: &str) -> Result<String, String> {
     let message = message.trim();

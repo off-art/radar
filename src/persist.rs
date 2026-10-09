@@ -3,7 +3,7 @@
 //! Процессы агентов при закрытии Radar завершаются, поэтому восстанавливается сам список:
 //! агент, папка, имя, режим «без уведомлений». Claude Code продолжает прежний диалог.
 
-use crate::config::config_dir;
+use crate::paths::config_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

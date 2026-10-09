@@ -68,10 +68,6 @@ pub fn installable() -> Vec<&'static str> {
     SPECS.iter().map(|s| s.id).collect()
 }
 
-fn home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
-}
-
 /// Файл, который правит интеграция.
 pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
     Some(match id {
@@ -91,15 +87,15 @@ pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
 pub fn describe(id: &str) -> String {
     match id {
         "claude" => "встроено: хуки подключаются при каждом запуске".into(),
-        _ => match target_path(id, &home()) {
-            Some(p) => p.to_string_lossy().replacen(&*home().to_string_lossy(), "~", 1),
+        _ => match target_path(id, &crate::paths::home()) {
+            Some(p) => p.to_string_lossy().replacen(&*crate::paths::home().to_string_lossy(), "~", 1),
             None => "не поддерживается".into(),
         },
     }
 }
 
 pub fn state(id: &str) -> State {
-    state_in(id, &home())
+    state_in(id, &crate::paths::home())
 }
 
 fn state_in(id: &str, home: &Path) -> State {
@@ -125,11 +121,11 @@ fn state_in(id: &str, home: &Path) -> State {
 
 pub fn install(id: &str) -> Result<PathBuf> {
     let exe = std::env::current_exe().context("не удалось определить путь к radar")?;
-    install_in(id, &home(), &exe.to_string_lossy())
+    install_in(id, &crate::paths::home(), &exe.to_string_lossy())
 }
 
 pub fn uninstall(id: &str) -> Result<()> {
-    uninstall_in(id, &home())
+    uninstall_in(id, &crate::paths::home())
 }
 
 fn install_in(id: &str, home: &Path, exe: &str) -> Result<PathBuf> {

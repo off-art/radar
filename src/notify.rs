@@ -6,7 +6,7 @@
 //! системного «Glass». Если помощник не удалось создать — запасной вариант через `osascript`.
 //! Linux (для разработки): `notify-send` и `paplay`/`aplay`.
 
-use crate::config::config_dir;
+use crate::paths::config_dir;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 

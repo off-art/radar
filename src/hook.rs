@@ -4,7 +4,7 @@
 //! `radar hook <Событие>`. Эта команда читает JSON из stdin и передаёт его
 //! запущенному интерфейсу через unix-сокет.
 
-use crate::config::config_dir;
+use crate::paths::config_dir;
 use crate::session::{shq, Msg};
 use anyhow::Result;
 use serde_json::{json, Value};

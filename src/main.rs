@@ -15,6 +15,7 @@ mod integrations;
 mod keys;
 mod menu;
 mod notify;
+mod paths;
 mod persist;
 mod session;
 mod status;
@@ -179,7 +180,7 @@ fn main() -> Result<()> {
     let mut start_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut autostart = vec![];
     for a in &args {
-        let p = app::expand_tilde(a);
+        let p = paths::expand_tilde(a);
         if p.is_dir() {
             start_dir = p.canonicalize().unwrap_or(p);
         } else if let Some(def) = cfg.find(a) {

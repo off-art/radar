@@ -183,7 +183,7 @@ pub fn run(raw: &[String]) -> Result<i32> {
             let agent = a.pos.first().ok_or_else(|| anyhow!("укажите агента: radar ctl new claude [папка]"))?;
             let dir = match a.pos.get(1) {
                 Some(d) => {
-                    std::fs::canonicalize(crate::app::expand_tilde(d)).with_context(|| format!("нет папки {d}"))?
+                    std::fs::canonicalize(crate::paths::expand_tilde(d)).with_context(|| format!("нет папки {d}"))?
                 }
                 None => std::env::current_dir()?,
             };

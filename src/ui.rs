@@ -1,6 +1,7 @@
 //! Отрисовка интерфейса.
 
-use crate::app::{short_path, App, Confirm, Mode, NewForm, Palette, PaneRect};
+use crate::paths::short_path;
+use crate::app::{App, Confirm, Mode, NewForm, Palette, PaneRect};
 use crate::menu::Menu;
 use crate::session::Session;
 use crate::status::Status;

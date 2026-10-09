@@ -9,7 +9,7 @@ use crate::session::{Attention, Msg, Session, SpawnCtx};
 use crate::status::Status;
 use crate::textfield::TextField;
 use crate::ui;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
     EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -17,7 +17,7 @@ use crossterm::event::{
 use crossterm::execute;
 use ratatui::layout::Rect;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -206,49 +206,6 @@ fn form_complete(f: &mut NewForm) {
     f.hints = c.matches;
 }
 
-pub fn expand_tilde(p: &str) -> PathBuf {
-    if p == "~" {
-        return dirs::home_dir().unwrap_or_default();
-    }
-    if let Some(rest) = p.strip_prefix("~/") {
-        return dirs::home_dir().unwrap_or_default().join(rest);
-    }
-    PathBuf::from(p)
-}
-
-pub fn short_path(p: &Path) -> String {
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(rest) = p.strip_prefix(&home) {
-            return if rest.as_os_str().is_empty() { "~".into() } else { format!("~/{}", rest.display()) };
-        }
-    }
-    p.display().to_string()
-}
-
-fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
-    let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().context("git не найден")?;
-    if !out.status.success() {
-        return Err(anyhow!("{}", String::from_utf8_lossy(&out.stderr).trim()));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-/// Создаёт отдельный git worktree, чтобы агенты не мешали друг другу в одном репозитории.
-fn make_worktree(dir: &Path, agent_id: &str) -> Result<PathBuf> {
-    let top = PathBuf::from(
-        run_git(dir, &["rev-parse", "--show-toplevel"]).map_err(|_| anyhow!("папка не в git-репозитории"))?,
-    );
-    let repo = top.file_name().map_or_else(|| "repo".into(), |s| s.to_string_lossy().to_string());
-    let stamp =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
-    let slug = format!("{agent_id}-{stamp}");
-    let base = dirs::home_dir().unwrap_or_default().join(".radar").join("worktrees");
-    std::fs::create_dir_all(&base)?;
-    let path = base.join(format!("{repo}-{slug}"));
-    run_git(&top, &["worktree", "add", "-b", &format!("radar/{slug}"), &path.to_string_lossy()])?;
-    Ok(path)
-}
-
 impl App {
     pub fn new(cfg: Config, start_dir: PathBuf, tx: Sender<Msg>, ctx: SpawnCtx) -> App {
         let notifications = cfg.notifications;
@@ -383,7 +340,7 @@ impl App {
             return Err(anyhow!("папка не найдена: {}", dir.display()));
         }
         let (cwd, wt) = if worktree {
-            let p = make_worktree(&dir, &def.id)?;
+            let p = crate::gitops::add_worktree(&dir, &def.id).map_err(|e| anyhow!(e))?;
             (p.clone(), Some(p))
         } else {
             (dir, None)
@@ -1184,7 +1141,7 @@ impl App {
         self.mode = Mode::New(NewForm {
             agent: chosen,
             show_all,
-            dir: TextField::new(&short_path(&dir)),
+            dir: TextField::new(&crate::paths::short_path(&dir)),
             name: TextField::default(),
             worktree: false,
             field: if agent.is_some() { 1 } else { 0 },
@@ -2329,7 +2286,7 @@ impl App {
             KeyCode::Esc => return,
             KeyCode::Enter => {
                 let def = self.cfg.agents[f.agent].clone();
-                let dir = expand_tilde(f.dir.text().trim());
+                let dir = crate::paths::expand_tilde(f.dir.text().trim());
                 let name = Some(f.name.text());
                 match self.create_session(def, dir, name, f.worktree) {
                     Ok(()) => return,

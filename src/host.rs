@@ -9,6 +9,7 @@
 //! `Q` завершить агента и хозяина (можно без `A` — так работает `radar stop`).
 //! События хуков агент шлёт хозяину «голым» JSON (первый байт `{`), хозяин пересылает их окну кадром `H`.
 
+use crate::paths::run_dir;
 use anyhow::{anyhow, bail, Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
@@ -75,10 +76,6 @@ pub fn read_frame(r: &mut impl Read) -> std::io::Result<Option<(u8, Vec<u8>)>> {
 }
 
 // ───────────── каталог сокетов ─────────────
-
-pub fn run_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".radar").join("run")
-}
 
 /// Новый путь сокета хозяина.
 pub fn new_sock_path(id: u32) -> PathBuf {

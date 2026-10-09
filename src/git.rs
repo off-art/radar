@@ -7,7 +7,7 @@ use crate::session::Msg;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -47,52 +47,31 @@ impl Info {
     }
 }
 
-/// Запускает git с таймаутом; возвращает stdout при успехе.
-pub fn run(dir: &Path, args: &[&str]) -> Option<String> {
-    run_timeout(dir, args, Duration::from_secs(3))
+/// Результат запуска git.
+struct Captured {
+    ok: bool,
+    stdout: String,
+    stderr: String,
 }
 
-pub fn run_timeout(dir: &Path, args: &[&str], limit: Duration) -> Option<String> {
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    // stdout читаем в отдельном потоке: большой вывод (diff) иначе заполнит канал и git зависнет
-    let mut stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
+/// Читает поток до конца в отдельном потоке: большой вывод (diff) иначе заполнит канал, и git зависнет.
+fn drain(mut pipe: impl std::io::Read + Send + 'static) -> Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        use std::io::Read;
         let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
+        let _ = pipe.read_to_end(&mut buf);
         let _ = tx.send(buf);
     });
-    match rx.recv_timeout(limit) {
-        Ok(buf) => {
-            let ok = child.wait().is_ok_and(|s| s.success());
-            ok.then(|| String::from_utf8_lossy(&buf).into_owned())
-        }
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            None
-        }
-    }
+    rx
 }
 
-/// Выполняет git для действий пользователя (commit, push, merge…): возвращает вывод или текст ошибки.
-/// Никогда не ждёт ввода: запрос пароля отключён, ssh — в пакетном режиме.
-pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+/// Запускает git и ждёт не дольше `limit`. Никогда не ждёт ввода: запрос пароля отключён, ssh — в пакетном режиме.
+fn capture(dir: &Path, args: &[&str], limit: Duration) -> Result<Captured, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(dir)
         .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -101,48 +80,47 @@ pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String
         cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
     }
     let mut child = cmd.spawn().map_err(|_| "git не найден".to_string())?;
-    let mut out = child.stdout.take().ok_or("нет stdout")?;
-    let mut err = child.stderr.take().ok_or("нет stderr")?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let tx2 = tx.clone();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut b = Vec::new();
-        let _ = out.read_to_end(&mut b);
-        let _ = tx.send((true, b));
-    });
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut b = Vec::new();
-        let _ = err.read_to_end(&mut b);
-        let _ = tx2.send((false, b));
-    });
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let start = Instant::now();
-    for _ in 0..2 {
-        let left = limit.saturating_sub(start.elapsed());
-        match rx.recv_timeout(left) {
-            Ok((true, b)) => so = b,
-            Ok((false, b)) => se = b,
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("git не ответил за {} с", limit.as_secs()));
-            }
-        }
-    }
+    let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("не удалось прочитать вывод git".into());
+    };
+    let (out, err) = (drain(out), drain(err));
+    let deadline = Instant::now() + limit;
+    let wait = |rx: &Receiver<Vec<u8>>| rx.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+    let (Ok(stdout), Ok(stderr)) = (wait(&out), wait(&err)) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("git не ответил за {} с", limit.as_secs()));
+    };
     let ok = child.wait().is_ok_and(|s| s.success());
-    let so = String::from_utf8_lossy(&so).trim().to_string();
-    let se = String::from_utf8_lossy(&se).trim().to_string();
-    if ok {
-        Ok(if so.is_empty() { se } else { so })
+    Ok(Captured {
+        ok,
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    })
+}
+
+/// Запускает git с таймаутом 3 с; возвращает stdout при успехе.
+pub fn run(dir: &Path, args: &[&str]) -> Option<String> {
+    run_timeout(dir, args, Duration::from_secs(3))
+}
+
+pub fn run_timeout(dir: &Path, args: &[&str], limit: Duration) -> Option<String> {
+    capture(dir, args, limit).ok().filter(|c| c.ok).map(|c| c.stdout)
+}
+
+/// Выполняет git для действий пользователя (commit, push, merge…): возвращает вывод или текст ошибки.
+pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    let c = capture(dir, args, limit)?;
+    let (so, se) = (c.stdout.trim(), c.stderr.trim());
+    if c.ok {
+        Ok(if so.is_empty() { se } else { so }.to_string())
     } else {
-        Err(if !se.is_empty() {
-            se
-        } else if !so.is_empty() {
-            so
-        } else {
-            "git завершился с ошибкой".into()
+        Err(match (se.is_empty(), so.is_empty()) {
+            (false, _) => se.to_string(),
+            (true, false) => so.to_string(),
+            (true, true) => "git завершился с ошибкой".to_string(),
         })
     }
 }

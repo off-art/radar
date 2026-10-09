@@ -1,6 +1,6 @@
 //! Автодополнение пути к папке в форме «Новый агент» (клавиша Tab, как в шелле).
 
-use crate::app::expand_tilde;
+use crate::paths::expand_tilde;
 use std::path::PathBuf;
 
 /// Результат одного нажатия Tab.
