@@ -2,10 +2,10 @@
 
 use crate::app::{short_path, App, Confirm, Mode, NewForm, Palette, PaneRect};
 use crate::menu::Menu;
-use crate::textfield::TextField;
 use crate::session::Session;
-use crate::theme::Theme;
 use crate::status::Status;
+use crate::textfield::TextField;
+use crate::theme::Theme;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -162,17 +162,12 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
     ]);
     buf.set_line(area.x, area.y, &title, w as u16);
     if g.new_btn.width > 0 {
-        let btn = Line::from(Span::styled(
-            " + новый ",
-            Style::default().fg(th.on_color).bg(th.subtext),
-        ));
+        let btn = Line::from(Span::styled(" + новый ", Style::default().fg(th.on_color).bg(th.subtext)));
         buf.set_line(g.new_btn.x, g.new_btn.y, &btn, g.new_btn.width);
     }
 
-    let mut sum: Vec<Span> = vec![Span::styled(
-        format!(" {} в списке", app.sessions.len()),
-        Style::default().fg(th.dim),
-    )];
+    let mut sum: Vec<Span> =
+        vec![Span::styled(format!(" {} в списке", app.sessions.len()), Style::default().fg(th.dim))];
     if working > 0 {
         sum.push(Span::styled(
             format!("  {} {}", SPINNER[(ms / 80) as usize % 10], working),
@@ -180,16 +175,10 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
         ));
     }
     if waiting > 0 {
-        sum.push(Span::styled(
-            format!("  ● {waiting}"),
-            Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
-        ));
+        sum.push(Span::styled(format!("  ● {waiting}"), Style::default().fg(th.accent).add_modifier(Modifier::BOLD)));
     }
     if idle > 0 {
-        sum.push(Span::styled(
-            format!("  ✓ {idle}"),
-            Style::default().fg(th.green),
-        ));
+        sum.push(Span::styled(format!("  ✓ {idle}"), Style::default().fg(th.green)));
     }
     buf.set_line(area.x, area.y + 1, &Line::from(sum), w as u16);
 
@@ -284,11 +273,7 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
         push_fit(&mut l2, &s.agent, bg.fg(s.color), &mut left);
         push_fit(&mut l2, " · ", bg.fg(th.dim), &mut left);
         push_fit(&mut l2, s.status.label(), bg.fg(col), &mut left);
-        let sub = if s.status == Status::Waiting && !s.note.is_empty() {
-            s.note.clone()
-        } else {
-            s.subtitle.clone()
-        };
+        let sub = if s.status == Status::Waiting && !s.note.is_empty() { s.note.clone() } else { s.subtitle.clone() };
         if !sub.is_empty() {
             push_fit(&mut l2, " · ", bg.fg(th.dim), &mut left);
             push_fit(&mut l2, &sub.replace('\n', " "), bg.fg(th.dim), &mut left);
@@ -408,15 +393,16 @@ fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         let border = if focused { col } else { th.line };
         let title = Line::from(vec![
             Span::styled(format!(" {} ", icon(s, ms)), Style::default().fg(col).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                format!("{} ", s.name),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(format!("{} ", s.name), Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(format!("· {} {} ", s.status.label(), status_time(s)), Style::default().fg(col)),
         ]);
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border).add_modifier(if focused { Modifier::BOLD } else { Modifier::empty() }))
+            .border_style(Style::default().fg(border).add_modifier(if focused {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }))
             .title(title);
         f.render_widget(block, pane.outer);
     }
@@ -427,22 +413,21 @@ fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
     if s.status == Status::Exited && pane.inner.height > 1 {
         let y = pane.inner.bottom() - 1;
         let code = s.exit_code.unwrap_or(0);
-        let msg = format!(" процесс завершён (код {code}) · ПКМ — перезапустить или закрыть · {} затем R / x ", app.prefix_label());
+        let msg = format!(
+            " процесс завершён (код {code}) · ПКМ — перезапустить или закрыть · {} затем R / x ",
+            app.prefix_label()
+        );
         let r = Rect::new(pane.inner.x, y, pane.inner.width, 1);
         f.render_widget(Clear, r);
         f.render_widget(
-            Paragraph::new(fit(&msg, r.width as usize))
-                .style(Style::default().fg(th.on_color).bg(th.red)),
+            Paragraph::new(fit(&msg, r.width as usize)).style(Style::default().fg(th.on_color).bg(th.red)),
             r,
         );
     } else if s.scroll > 0 && pane.inner.height > 1 {
         let msg = format!(" прокрутка ↑{} · колесо вниз или ввод — вернуться ", s.scroll);
         let w = msg.width() as u16;
         let r = Rect::new(pane.inner.right().saturating_sub(w), pane.inner.y, w.min(pane.inner.width), 1);
-        f.render_widget(
-            Paragraph::new(msg).style(Style::default().fg(th.on_color).bg(th.dim)),
-            r,
-        );
+        f.render_widget(Paragraph::new(msg).style(Style::default().fg(th.on_color).bg(th.dim)), r);
     }
 
     // курсор — только у активной панели
@@ -544,10 +529,7 @@ fn draw_welcome(f: &mut Frame, app: &App) {
 // ───────────── статус-бар ─────────────
 
 fn key_hint(spans: &mut Vec<Span<'static>>, key: &str, text: &str, th: &Theme) {
-    spans.push(Span::styled(
-        key.to_string(),
-        Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
-    ));
+    spans.push(Span::styled(key.to_string(), Style::default().fg(th.accent).add_modifier(Modifier::BOLD)));
     spans.push(Span::styled(format!(" {text}  "), Style::default().fg(th.dim)));
 }
 
@@ -568,10 +550,8 @@ fn draw_statusbar(f: &mut Frame, app: &App) {
             Style::default().fg(th.on_color).bg(amber).add_modifier(Modifier::BOLD),
         ));
     } else if matches!(app.mode, Mode::Nav(_)) {
-        spans.push(Span::styled(
-            " НАВИГАЦИЯ ",
-            Style::default().fg(th.on_color).bg(amber).add_modifier(Modifier::BOLD),
-        ));
+        spans
+            .push(Span::styled(" НАВИГАЦИЯ ", Style::default().fg(th.on_color).bg(amber).add_modifier(Modifier::BOLD)));
         spans.push(Span::raw(" "));
         for (k, t) in [
             ("j/k", "агент"),
@@ -589,10 +569,7 @@ fn draw_statusbar(f: &mut Frame, app: &App) {
             key_hint(&mut spans, k, t, th);
         }
     } else if matches!(app.mode, Mode::Normal) {
-        spans.push(Span::styled(
-            format!(" {} ", app.prefix_label()),
-            Style::default().fg(th.subtext).bg(th.line),
-        ));
+        spans.push(Span::styled(format!(" {} ", app.prefix_label()), Style::default().fg(th.subtext).bg(th.line)));
         spans.push(Span::styled(" навигация  ", Style::default().fg(th.dim)));
         key_hint(&mut spans, "ПКМ", "меню", th);
         if let Some(l) = app.cfg.keys.direct_label(crate::keys::Action::Next) {
@@ -612,11 +589,7 @@ fn draw_statusbar(f: &mut Frame, app: &App) {
         if !badge.is_empty() {
             spans.push(Span::styled(badge.clone(), Style::default().fg(th.on_color).bg(amber)));
         }
-        let st = if app.notifications {
-            Style::default().fg(th.subtext)
-        } else {
-            Style::default().fg(th.red)
-        };
+        let st = if app.notifications { Style::default().fg(th.subtext) } else { Style::default().fg(th.red) };
         spans.push(Span::styled(right, st));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), r);
@@ -634,10 +607,7 @@ fn popup_block(th: &Theme, title: &str) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(th.accent))
-        .title(Span::styled(
-            format!(" {title} "),
-            Style::default().add_modifier(Modifier::BOLD),
-        ))
+        .title(Span::styled(format!(" {title} "), Style::default().add_modifier(Modifier::BOLD)))
 }
 
 /// Поле ввода с видимым курсором.
@@ -673,11 +643,8 @@ pub fn form_layout(area: Rect, app: &App, form: &NewForm) -> FormLayout {
     let w = 78u16.min(area.width);
     // сначала раскладываем чипы по строкам, чтобы знать высоту окна
     let avail = w.saturating_sub(2 + FORM_LABEL) as usize;
-    let mut items: Vec<(usize, String)> = app
-        .visible_agents(form.show_all)
-        .into_iter()
-        .map(|i| (i, format!(" {} ", app.cfg.agents[i].name)))
-        .collect();
+    let mut items: Vec<(usize, String)> =
+        app.visible_agents(form.show_all).into_iter().map(|i| (i, format!(" {} ", app.cfg.agents[i].name))).collect();
     let hidden = app.cfg.agents.len() - app.visible_agents(false).len();
     if form.show_all {
         if hidden > 0 {
@@ -738,11 +705,17 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
     // выбор агента (строки чипов)
     let mut lines: Vec<Line> = vec![];
     for (ri, row) in lay.rows.iter().enumerate() {
-        let mut spans = vec![if ri == 0 { label("Агент", form.field == 0) } else { Span::raw(" ".repeat(FORM_LABEL as usize)) }];
+        let mut spans = vec![if ri == 0 {
+            label("Агент", form.field == 0)
+        } else {
+            Span::raw(" ".repeat(FORM_LABEL as usize))
+        }];
         for &k in row {
             let (i, rect) = lay.chips[k];
             let text = if i == usize::MAX {
-                if form.show_all { " − скрыть недоступных ".to_string() } else {
+                if form.show_all {
+                    " − скрыть недоступных ".to_string()
+                } else {
                     let hidden = app.cfg.agents.len() - app.visible_agents(false).len();
                     format!(" + ещё {hidden} (не установлены) ")
                 }
@@ -770,10 +743,8 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
     }
 
     let dir_text = form.dir.text();
-    let default_name = std::path::Path::new(dir_text.trim())
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let default_name =
+        std::path::Path::new(dir_text.trim()).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let mut name_line = vec![label("Имя", form.field == 2)];
     if form.name.is_empty() && form.field != 2 {
         name_line.push(Span::styled(format!("(по умолчанию: {default_name})"), Style::default().fg(th.dim)));
@@ -824,12 +795,11 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
         Line::from(vec![
             label("", form.field == 3),
             Span::styled(
-                format!("[{}] отдельный git worktree (изоляция от других агентов)", if form.worktree { "x" } else { " " }),
-                if form.field == 3 {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                },
+                format!(
+                    "[{}] отдельный git worktree (изоляция от других агентов)",
+                    if form.worktree { "x" } else { " " }
+                ),
+                if form.field == 3 { Style::default().add_modifier(Modifier::BOLD) } else { Style::default() },
             ),
         ]),
         Line::from(""),
@@ -839,10 +809,7 @@ fn draw_form(f: &mut Frame, app: &App, form: &NewForm) {
         )),
     ]);
     if let Some(e) = &form.error {
-        lines.push(Line::from(Span::styled(
-            fit(e, inner.width as usize),
-            Style::default().fg(th.red),
-        )));
+        lines.push(Line::from(Span::styled(fit(e, inner.width as usize), Style::default().fg(th.red))));
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -930,7 +897,9 @@ pub fn group_hit(th: &Theme, g: &crate::app::GroupForm, area: Rect) -> Hit {
     Hit {
         popup: r,
         buttons: rects.into_iter().map(|b| at(inner, last, b)).collect(),
-        rows: (first..first + rows).map(|n| (n, Rect::new(inner.x, inner.y + (4 + n - first) as u16, inner.width, 1))).collect(),
+        rows: (first..first + rows)
+            .map(|n| (n, Rect::new(inner.x, inner.y + (4 + n - first) as u16, inner.width, 1)))
+            .collect(),
         field: Rect::new(inner.x, inner.y, inner.width, 2),
     }
 }
@@ -949,14 +918,20 @@ fn draw_group_form(f: &mut Frame, app: &App, g: &crate::app::GroupForm) {
         Line::from(Span::styled("Агенты в группе (клик или Пробел — отметить):", Style::default().fg(th.dim))),
     ];
     if g.ids.is_empty() {
-        lines.push(Line::from(Span::styled("  агентов пока нет — группу можно создать пустой", Style::default().fg(th.dim))));
+        lines.push(Line::from(Span::styled(
+            "  агентов пока нет — группу можно создать пустой",
+            Style::default().fg(th.dim),
+        )));
     }
     for (n, id) in g.ids.iter().enumerate().skip(first).take(rows) {
         let Some(s) = app.sessions.iter().find(|s| s.id == *id) else { continue };
         let on = g.checked.get(n).copied().unwrap_or(false);
         let here = g.focus == 1 && n == g.cursor;
         let base = if here { Style::default().fg(th.on_color).bg(th.accent) } else { Style::default() };
-        let other = s.group.as_deref().filter(|x| !on && Some(*x) != g.orig.and_then(|i| app.groups.get(i)).map(String::as_str));
+        let other = s
+            .group
+            .as_deref()
+            .filter(|x| !on && Some(*x) != g.orig.and_then(|i| app.groups.get(i)).map(String::as_str));
         let tail = other.map(|o| format!("  (сейчас в «{o}»)")).unwrap_or_default();
         lines.push(Line::from(vec![
             Span::styled(format!(" [{}] ", if on { "x" } else { " " }), base),
@@ -974,9 +949,7 @@ fn draw_group_form(f: &mut Frame, app: &App, g: &crate::app::GroupForm) {
 fn draw_menu(f: &mut Frame, m: &Menu, th: &Theme) {
     let r = m.rect;
     clear(f, r, th);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(th.dim));
+    let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(th.dim));
     f.render_widget(block, r);
     let w = r.width.saturating_sub(4) as usize;
     for (i, it) in m.items.iter().enumerate() {
@@ -986,10 +959,7 @@ fn draw_menu(f: &mut Frame, m: &Menu, th: &Theme) {
         }
         let area = Rect::new(r.x + 1, y, r.width - 2, 1);
         if it.action.is_none() {
-            f.render_widget(
-                Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(th.line)),
-                area,
-            );
+            f.render_widget(Paragraph::new("─".repeat(area.width as usize)).style(Style::default().fg(th.line)), area);
             continue;
         }
         let sel = i == m.sel && it.enabled;
@@ -1024,7 +994,9 @@ pub fn palette_hit(th: &Theme, p: &Palette, area: Rect) -> Hit {
     let n = p.matches().len();
     Hit {
         popup: r,
-        rows: (first..n.min(first + rows)).map(|pos| (pos, Rect::new(inner.x, inner.y + 2 + (pos - first) as u16, inner.width, 1))).collect(),
+        rows: (first..n.min(first + rows))
+            .map(|pos| (pos, Rect::new(inner.x, inner.y + 2 + (pos - first) as u16, inner.width, 1)))
+            .collect(),
         ..Default::default()
     }
 }
@@ -1071,7 +1043,10 @@ fn approve_geom(app: &App, i: usize, note: &str, sel: Option<usize>, area: Rect)
     let w = area.width.saturating_sub(4).min(78).max(30);
     let text_w = w.saturating_sub(4) as usize;
     let mut lines: Vec<Line<'static>> = vec![
-        Line::from(Span::styled(format!("{} · {} просит разрешение:", s.agent, s.name), Style::default().fg(th.subtext))),
+        Line::from(Span::styled(
+            format!("{} · {} просит разрешение:", s.agent, s.name),
+            Style::default().fg(th.subtext),
+        )),
         Line::from(Span::styled(fit(note, text_w), Style::default().add_modifier(Modifier::BOLD))),
         Line::from(""),
     ];
@@ -1175,7 +1150,10 @@ fn confirm_view(app: &App, c: &Confirm) -> ConfirmView {
             x
         }
         Confirm::DeleteGroup(i) => {
-            let n = app.groups.get(*i).map_or(0, |g| app.sessions.iter().filter(|s| s.group.as_deref() == Some(g.as_str())).count());
+            let n = app
+                .groups
+                .get(*i)
+                .map_or(0, |g| app.sessions.iter().filter(|s| s.group.as_deref() == Some(g.as_str())).count());
             let mut x = v("Удалить группу?", app.groups.get(*i).cloned().unwrap_or_default(), "Удалить");
             x.detail = Some(if n > 0 {
                 format!("Агенты ({n}) останутся в списке без группы")
@@ -1287,10 +1265,7 @@ fn draw_help(f: &mut Frame, app: &App) {
     let mut lines: Vec<Line> = rows
         .iter()
         .map(|(k, t)| {
-            Line::from(vec![
-                Span::styled(format!("{k:<24}"), Style::default().fg(th.accent)),
-                Span::raw(t.to_string()),
-            ])
+            Line::from(vec![Span::styled(format!("{k:<24}"), Style::default().fg(th.accent)), Span::raw(t.to_string())])
         })
         .collect();
     lines.push(Line::from(""));
@@ -1320,11 +1295,7 @@ fn draw_settings(f: &mut Frame, app: &App, sel: usize) {
     draw_tabs(f, popup, 0, th);
     for (i, ((label, value), r)) in rows.iter().zip(&rects).enumerate() {
         let active = i == sel;
-        let base = if active {
-            Style::default().bg(th.active_row_bg)
-        } else {
-            Style::default()
-        };
+        let base = if active { Style::default().bg(th.active_row_bg) } else { Style::default() };
         let w = r.width as usize;
         let val = format!("‹ {value} ›");
         let gap = w.saturating_sub(label.width() + val.width() + 3);
@@ -1339,8 +1310,14 @@ fn draw_settings(f: &mut Frame, app: &App, sel: usize) {
     let hint = Rect::new(popup.x + 2, popup.bottom().saturating_sub(3), popup.width.saturating_sub(4), 2);
     f.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled("↑/↓ — строка · ←/→ или клик — изменить · Tab — раздел · Esc — закрыть", Style::default().fg(th.dim))),
-            Line::from(Span::styled("Цветовая схема применяется сразу. Свои цвета: [theme.custom] в config.toml", Style::default().fg(th.dim))),
+            Line::from(Span::styled(
+                "↑/↓ — строка · ←/→ или клик — изменить · Tab — раздел · Esc — закрыть",
+                Style::default().fg(th.dim),
+            )),
+            Line::from(Span::styled(
+                "Цветовая схема применяется сразу. Свои цвета: [theme.custom] в config.toml",
+                Style::default().fg(th.dim),
+            )),
         ]),
         hint,
     );
@@ -1395,7 +1372,10 @@ fn draw_log(f: &mut Frame, app: &App, sel: usize) {
     f.render_widget(popup_block(th, "Лента событий"), popup);
     if total == 0 {
         f.render_widget(
-            Paragraph::new(Span::styled("Пока пусто: события появятся, когда агенты что-то сделают", Style::default().fg(th.dim))),
+            Paragraph::new(Span::styled(
+                "Пока пусто: события появятся, когда агенты что-то сделают",
+                Style::default().fg(th.dim),
+            )),
             Rect::new(popup.x + 3, popup.y + 2, popup.width.saturating_sub(4), 1),
         );
     }
@@ -1430,7 +1410,10 @@ fn draw_log(f: &mut Frame, app: &App, sel: usize) {
     }
     let hint = Rect::new(popup.x + 3, popup.bottom().saturating_sub(2), popup.width.saturating_sub(4), 1);
     f.render_widget(
-        Paragraph::new(Span::styled("↑/↓ — выбор · Enter или клик — к агенту · Esc — закрыть", Style::default().fg(th.dim))),
+        Paragraph::new(Span::styled(
+            "↑/↓ — выбор · Enter или клик — к агенту · Esc — закрыть",
+            Style::default().fg(th.dim),
+        )),
         hint,
     );
 }
@@ -1444,10 +1427,7 @@ fn draw_integrations(f: &mut Frame, app: &App, sel: usize) {
     f.render_widget(popup_block(th, "Настройки"), popup);
     draw_tabs(f, popup, 1, th);
     f.render_widget(
-        Paragraph::new(Span::styled(
-            "Точные статусы агентов вместо разбора экрана",
-            Style::default().fg(th.dim),
-        )),
+        Paragraph::new(Span::styled("Точные статусы агентов вместо разбора экрана", Style::default().fg(th.dim))),
         Rect::new(popup.x + 3, popup.y + 2, popup.width.saturating_sub(4), 1),
     );
     for (i, (row, r)) in rows.iter().zip(&rects).enumerate() {
@@ -1483,8 +1463,14 @@ fn draw_integrations(f: &mut Frame, app: &App, sel: usize) {
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled(detail, Style::default().fg(th.dim))),
-            Line::from(Span::styled("↑/↓ — выбор · Enter/Space/клик — включить/выключить", Style::default().fg(th.dim))),
-            Line::from(Span::styled("Tab — раздел · Esc — закрыть · агента нужно перезапустить", Style::default().fg(th.dim))),
+            Line::from(Span::styled(
+                "↑/↓ — выбор · Enter/Space/клик — включить/выключить",
+                Style::default().fg(th.dim),
+            )),
+            Line::from(Span::styled(
+                "Tab — раздел · Esc — закрыть · агента нужно перезапустить",
+                Style::default().fg(th.dim),
+            )),
         ]),
         hint,
     );

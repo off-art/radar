@@ -59,10 +59,7 @@ pub fn save_text(text: &str) {
 }
 
 pub fn load() -> File {
-    std::fs::read_to_string(path())
-        .ok()
-        .and_then(|t| toml::from_str(&t).ok())
-        .unwrap_or_default()
+    std::fs::read_to_string(path()).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -74,8 +71,22 @@ mod tests {
         let f = File {
             selected: 1,
             sessions: vec![
-                Saved { agent: "Claude Code".into(), dir: "/a b".into(), name: "api".into(), resume: Some("abc".into()), ..Default::default() },
-                Saved { agent: "Codex".into(), dir: "/x".into(), name: "x #2".into(), muted: true, worktree: Some("/w".into()), resume: None, group: Some("Фронт".into()) },
+                Saved {
+                    agent: "Claude Code".into(),
+                    dir: "/a b".into(),
+                    name: "api".into(),
+                    resume: Some("abc".into()),
+                    ..Default::default()
+                },
+                Saved {
+                    agent: "Codex".into(),
+                    dir: "/x".into(),
+                    name: "x #2".into(),
+                    muted: true,
+                    worktree: Some("/w".into()),
+                    resume: None,
+                    group: Some("Фронт".into()),
+                },
             ],
             groups: vec!["Фронт".into(), "пустая".into()],
             collapsed: vec!["api".into()],

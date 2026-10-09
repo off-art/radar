@@ -6,7 +6,12 @@ use std::collections::HashSet;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Row {
     /// Заголовок группы: имя, индекс первого агента, число агентов, свёрнута ли.
-    Header { key: String, first: usize, count: usize, collapsed: bool },
+    Header {
+        key: String,
+        first: usize,
+        count: usize,
+        collapsed: bool,
+    },
     Item(usize),
     /// Поясняющая строка («Без группы», «пусто»).
     Text(String),

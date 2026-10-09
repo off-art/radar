@@ -1,8 +1,8 @@
 mod app;
 mod clipboard;
 mod complete;
-mod ctl;
 mod config;
+mod ctl;
 mod diff;
 mod events;
 mod git;
@@ -130,16 +130,14 @@ fn main() -> Result<()> {
             println!("radar {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Some("ctl") => {
-            match ctl::run(&args[1..]) {
-                Ok(0) => return Ok(()),
-                Ok(code) => std::process::exit(code),
-                Err(e) => {
-                    eprintln!("radar ctl: {e:#}");
-                    std::process::exit(1);
-                }
+        Some("ctl") => match ctl::run(&args[1..]) {
+            Ok(0) => return Ok(()),
+            Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("radar ctl: {e:#}");
+                std::process::exit(1);
             }
-        }
+        },
         Some("host") => return host::run_host(),
         Some("stop") => {
             let n = host::stop_all();
@@ -196,10 +194,7 @@ fn main() -> Result<()> {
     let sock = hook::socket_path();
     hook::start_server(&sock, tx.clone())?;
     let claude_settings = hook::write_claude_settings().ok();
-    let ctx = session::SpawnCtx {
-        sock: sock.clone(),
-        claude_settings,
-    };
+    let ctx = session::SpawnCtx { sock: sock.clone(), claude_settings };
 
     let mut app = app::App::new(cfg, start_dir.clone(), tx, ctx);
     let mut errors = vec![];

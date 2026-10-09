@@ -33,31 +33,12 @@ struct Spec {
     method: Method,
 }
 
-const QWEN_EVENTS: &[&str] = &[
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PostToolUse",
-    "Notification",
-    "PermissionRequest",
-    "Stop",
-];
-const CODEX_EVENTS: &[&str] = &[
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PermissionRequest",
-    "PostToolUse",
-    "Stop",
-];
-const GEMINI_EVENTS: &[&str] = &[
-    "SessionStart",
-    "BeforeAgent",
-    "BeforeTool",
-    "AfterTool",
-    "AfterAgent",
-    "Notification",
-];
+const QWEN_EVENTS: &[&str] =
+    &["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "PermissionRequest", "Stop"];
+const CODEX_EVENTS: &[&str] =
+    &["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"];
+const GEMINI_EVENTS: &[&str] =
+    &["SessionStart", "BeforeAgent", "BeforeTool", "AfterTool", "AfterAgent", "Notification"];
 
 const SPECS: &[Spec] = &[
     Spec { id: "qwen", method: Method::JsonHooks(QWEN_EVENTS) },
@@ -98,10 +79,9 @@ pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
         // GigaCode — форк Qwen Code; в документации путь не указан, по умолчанию ~/.gigacode
         "gigacode" => home.join(".gigacode/settings.json"),
         "gemini" => home.join(".gemini/settings.json"),
-        "codex" => std::env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".codex"))
-            .join("hooks.json"),
+        "codex" => {
+            std::env::var_os("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".codex")).join("hooks.json")
+        }
         "opencode" => home.join(".config/opencode/plugins/radar.js"),
         _ => return None,
     })
@@ -134,11 +114,13 @@ fn state_in(id: &str, home: &Path) -> State {
     };
     let on = match sp.method {
         Method::OpenCodePlugin => text.contains(PLUGIN_MARK),
-        Method::JsonHooks(_) => serde_json::from_str::<Value>(&text)
-            .map(|v| has_radar_hooks(&v))
-            .unwrap_or(false),
+        Method::JsonHooks(_) => serde_json::from_str::<Value>(&text).map(|v| has_radar_hooks(&v)).unwrap_or(false),
     };
-    if on { State::Installed } else { State::NotInstalled }
+    if on {
+        State::Installed
+    } else {
+        State::NotInstalled
+    }
 }
 
 pub fn install(id: &str) -> Result<PathBuf> {
@@ -222,8 +204,9 @@ fn backup_once(p: &Path) -> Result<()> {
 fn read_json(path: &Path) -> Result<Value> {
     match std::fs::read_to_string(path) {
         Ok(t) if t.trim().is_empty() => Ok(Value::Object(Map::new())),
-        Ok(t) => serde_json::from_str(&t)
-            .with_context(|| format!("{}: не удалось разобрать JSON (комментарии не поддерживаются) — файл не тронут", path.display())),
+        Ok(t) => serde_json::from_str(&t).with_context(|| {
+            format!("{}: не удалось разобрать JSON (комментарии не поддерживаются) — файл не тронут", path.display())
+        }),
         Err(_) => Ok(Value::Object(Map::new())),
     }
 }
@@ -343,7 +326,10 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
         assert_eq!(v["theme"], "dark");
-        assert!(v["hooks"]["Stop"][1]["hooks"][0]["command"].as_str().unwrap().starts_with("'/opt/my radar' hook Stop"));
+        assert!(v["hooks"]["Stop"][1]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("'/opt/my radar' hook Stop"));
         assert!(backup_path(&p).exists());
 
         uninstall_in("qwen", &h).unwrap();

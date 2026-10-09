@@ -82,21 +82,15 @@ pub fn run_dir() -> PathBuf {
 
 /// Новый путь сокета хозяина.
 pub fn new_sock_path(id: u32) -> PathBuf {
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     run_dir().join(format!("{ms}-{id}.sock"))
 }
 
 /// Сокеты всех хозяев (по возрастанию времени создания). Мёртвые сокеты удаляются.
 pub fn live_sockets() -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(run_dir()) else { return vec![] };
-    let mut all: Vec<PathBuf> = rd
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |x| x == "sock"))
-        .collect();
+    let mut all: Vec<PathBuf> =
+        rd.flatten().map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "sock")).collect();
     all.sort();
     all.retain(|p| {
         let ok = UnixStream::connect(p).is_ok();
@@ -355,11 +349,7 @@ pub fn launch(spec: &Spec) -> Result<()> {
     let exe = std::env::current_exe()?;
     let logs = run_dir();
     std::fs::create_dir_all(&logs)?;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logs.join("host.log"))
-        .ok();
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(logs.join("host.log")).ok();
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("host").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null());
     match log {
@@ -416,7 +406,6 @@ pub fn stop_all() -> usize {
     }
     n
 }
-
 
 #[cfg(test)]
 mod tests {

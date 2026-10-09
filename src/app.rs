@@ -5,16 +5,14 @@ use crate::input::{key_to_bytes, mouse_to_bytes, MouseEv};
 use crate::keys::{nav_action, Action};
 use crate::menu::{filter_palette, Menu, MenuItem, PaletteEntry};
 use crate::notify::{self, Sound};
-use crate::textfield::TextField;
 use crate::session::{Attention, Msg, Session, SpawnCtx};
 use crate::status::Status;
+use crate::textfield::TextField;
 use crate::ui;
-use unicode_width::UnicodeWidthStr;
 use anyhow::{anyhow, Context, Result};
 use crossterm::event::{
-    self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-    EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEvent, MouseEventKind,
+    self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste, EnableFocusChange,
+    EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::execute;
 use ratatui::layout::Rect;
@@ -23,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr;
 
 pub struct NewForm {
     /// Индекс в `cfg.agents`.
@@ -49,7 +48,11 @@ pub struct Selection {
 impl Selection {
     /// (начало, конец) в порядке чтения.
     pub fn ordered(&self) -> ((u16, u16), (u16, u16)) {
-        if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
+        if self.anchor <= self.head {
+            (self.anchor, self.head)
+        } else {
+            (self.head, self.anchor)
+        }
     }
 }
 
@@ -216,23 +219,14 @@ pub fn expand_tilde(p: &str) -> PathBuf {
 pub fn short_path(p: &Path) -> String {
     if let Some(home) = dirs::home_dir() {
         if let Ok(rest) = p.strip_prefix(&home) {
-            return if rest.as_os_str().is_empty() {
-                "~".into()
-            } else {
-                format!("~/{}", rest.display())
-            };
+            return if rest.as_os_str().is_empty() { "~".into() } else { format!("~/{}", rest.display()) };
         }
     }
     p.display().to_string()
 }
 
 fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .context("git не найден")?;
+    let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().context("git не найден")?;
     if !out.status.success() {
         return Err(anyhow!("{}", String::from_utf8_lossy(&out.stderr).trim()));
     }
@@ -244,31 +238,14 @@ fn make_worktree(dir: &Path, agent_id: &str) -> Result<PathBuf> {
     let top = PathBuf::from(
         run_git(dir, &["rev-parse", "--show-toplevel"]).map_err(|_| anyhow!("папка не в git-репозитории"))?,
     );
-    let repo = top
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "repo".into());
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() % 100_000)
-        .unwrap_or(0);
+    let repo = top.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "repo".into());
+    let stamp =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() % 100_000).unwrap_or(0);
     let slug = format!("{agent_id}-{stamp}");
-    let base = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".radar")
-        .join("worktrees");
+    let base = dirs::home_dir().unwrap_or_default().join(".radar").join("worktrees");
     std::fs::create_dir_all(&base)?;
     let path = base.join(format!("{repo}-{slug}"));
-    run_git(
-        &top,
-        &[
-            "worktree",
-            "add",
-            "-b",
-            &format!("radar/{slug}"),
-            &path.to_string_lossy(),
-        ],
-    )?;
+    run_git(&top, &["worktree", "add", "-b", &format!("radar/{slug}"), &path.to_string_lossy()])?;
     Ok(path)
 }
 
@@ -390,13 +367,7 @@ impl App {
         }
     }
 
-    pub fn create_session(
-        &mut self,
-        def: AgentDef,
-        dir: PathBuf,
-        name: Option<String>,
-        worktree: bool,
-    ) -> Result<()> {
+    pub fn create_session(&mut self, def: AgentDef, dir: PathBuf, name: Option<String>, worktree: bool) -> Result<()> {
         self.create_session_with(def, dir, name, worktree, None)
     }
 
@@ -418,9 +389,7 @@ impl App {
             (dir, None)
         };
         let base = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
-            cwd.file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| def.name.clone())
+            cwd.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| def.name.clone())
         });
         // одинаковые имена (несколько агентов в одной папке) различаем номером
         let mut name = base.clone();
@@ -431,17 +400,7 @@ impl App {
         }
         let id = self.next_id;
         self.next_id += 1;
-        let s = Session::spawn(
-            id,
-            &def,
-            name,
-            cwd,
-            wt,
-            self.pane_size(),
-            self.tx.clone(),
-            &self.ctx,
-            resume,
-        )?;
+        let s = Session::spawn(id, &def, name, cwd, wt, self.pane_size(), self.tx.clone(), &self.ctx, resume)?;
         let (sid, agent_name, sname) = (s.id, s.agent.clone(), s.name.clone());
         self.sessions.push(s);
         self.events.push(sid, agent_name, crate::events::Kind::Started, format!("{sname}: запущен"));
@@ -564,7 +523,9 @@ impl App {
         if busy > 0 {
             self.toast(format!("Агентов в другом окне Radar: {busy} — они здесь не показаны"));
         } else if unknown > 0 {
-            self.toast(format!("Фоновых агентов не из этого конфига: {unknown} — они продолжают работать (radar stop — остановить)"));
+            self.toast(format!(
+                "Фоновых агентов не из этого конфига: {unknown} — они продолжают работать (radar stop — остановить)"
+            ));
         }
         self.dirty = true;
         socks.len()
@@ -735,12 +696,8 @@ impl App {
     /// Собирает агентов одной группы подряд (без группы — в конце); выбранным остаётся агент `keep`.
     fn normalize_groups(&mut self, keep: u32) {
         // группа, которой нет в списке (например, из старого файла), попадает в конец
-        let unknown: Vec<String> = self
-            .sessions
-            .iter()
-            .filter_map(|s| s.group.clone())
-            .filter(|g| !self.groups.contains(g))
-            .collect();
+        let unknown: Vec<String> =
+            self.sessions.iter().filter_map(|s| s.group.clone()).filter(|g| !self.groups.contains(g)).collect();
         for g in unknown {
             if !self.groups.contains(&g) {
                 self.groups.push(g);
@@ -773,7 +730,8 @@ impl App {
 
     fn open_group_form(&mut self, orig: Option<usize>) {
         let name = orig.and_then(|i| self.groups.get(i)).cloned().unwrap_or_default();
-        let checked = self.sessions.iter().map(|s| orig.is_some() && s.group.as_deref() == Some(name.as_str())).collect();
+        let checked =
+            self.sessions.iter().map(|s| orig.is_some() && s.group.as_deref() == Some(name.as_str())).collect();
         self.mode = Mode::GroupForm(GroupForm {
             orig,
             name: TextField::new(&name),
@@ -984,7 +942,8 @@ impl App {
             self.sidebar_first = 0;
         } else {
             self.sidebar_first = self.sidebar_first.min(sel_row);
-            while self.sidebar_first < sel_row && rows[self.sidebar_first..=sel_row].iter().map(rh).sum::<u16>() > avail {
+            while self.sidebar_first < sel_row && rows[self.sidebar_first..=sel_row].iter().map(rh).sum::<u16>() > avail
+            {
                 self.sidebar_first += 1;
             }
         }
@@ -1020,22 +979,15 @@ impl App {
                 }
             }
         }
-        let new_btn = if sw > 12 {
-            Rect::new(sidebar.x + sw - 1 - 9, sidebar.y, 9, 1)
-        } else {
-            Rect::default()
-        };
+        let new_btn = if sw > 12 { Rect::new(sidebar.x + sw - 1 - 9, sidebar.y, 9, 1) } else { Rect::default() };
         let group_btn = if sw >= 14 && body.height >= 8 {
             Rect::new(sidebar.x + 1, sidebar.y + body.height - 1, 16.min(sw - 2), 1)
         } else {
             Rect::default()
         };
         let nw = self.notif_label().width() as u16;
-        let notif_btn = if status.width > nw + 20 {
-            Rect::new(status.right() - nw, status.y, nw, 1)
-        } else {
-            Rect::default()
-        };
+        let notif_btn =
+            if status.width > nw + 20 { Rect::new(status.right() - nw, status.y, nw, 1) } else { Rect::default() };
 
         // панели
         let vis = self.visible_indices();
@@ -1064,12 +1016,8 @@ impl App {
                 let w = if c == in_row - 1 { main.width - cw * c } else { cw };
                 let h = if r as usize == rows - 1 { main.height - ch * r } else { ch };
                 let outer = Rect::new(main.x + c * cw, main.y + r * ch, w, h);
-                let inner = Rect::new(
-                    outer.x + 1,
-                    outer.y + 1,
-                    outer.width.saturating_sub(2),
-                    outer.height.saturating_sub(2),
-                );
+                let inner =
+                    Rect::new(outer.x + 1, outer.y + 1, outer.width.saturating_sub(2), outer.height.saturating_sub(2));
                 panes.push(PaneRect { idx, outer, header: None, inner });
             }
         }
@@ -1089,11 +1037,8 @@ impl App {
     // ───────────── статусы и уведомления ─────────────
 
     fn is_viewing(&self, idx: usize) -> bool {
-        let focused = if self.focus_supported {
-            self.term_focused
-        } else {
-            self.last_key.elapsed() < Duration::from_secs(8)
-        };
+        let focused =
+            if self.focus_supported { self.term_focused } else { self.last_key.elapsed() < Duration::from_secs(8) };
         focused && self.visible_indices().contains(&idx)
     }
 
@@ -1135,9 +1080,7 @@ impl App {
     }
 
     pub fn tick(&mut self) {
-        self.git.set_targets(
-            self.sessions.iter().filter(|s| s.is_running()).map(|s| (s.id, s.cwd.clone())).collect(),
-        );
+        self.git.set_targets(self.sessions.iter().filter(|s| s.is_running()).map(|s| (s.id, s.cwd.clone())).collect());
         for i in 0..self.sessions.len() {
             self.sessions[i].sync_meta();
             let before = self.sessions[i].status;
@@ -1164,9 +1107,7 @@ impl App {
     }
 
     pub fn needs_animation(&self) -> bool {
-        self.sessions
-            .iter()
-            .any(|s| matches!(s.status, Status::Working | Status::Waiting | Status::Starting))
+        self.sessions.iter().any(|s| matches!(s.status, Status::Working | Status::Waiting | Status::Starting))
     }
 
     pub fn on_msg(&mut self, msg: Msg) {
@@ -1234,11 +1175,7 @@ impl App {
     }
 
     fn open_new_form(&mut self, agent: Option<usize>) {
-        let dir = self
-            .sessions
-            .get(self.selected)
-            .map(|s| s.cwd.clone())
-            .unwrap_or_else(|| self.start_dir.clone());
+        let dir = self.sessions.get(self.selected).map(|s| s.cwd.clone()).unwrap_or_else(|| self.start_dir.clone());
         let last = self.cfg.agents.len().saturating_sub(1);
         let first_visible = self.visible_agents(false).first().copied().unwrap_or(0);
         let chosen = agent.map(|i| i.min(last)).unwrap_or(first_visible);
@@ -1296,12 +1233,20 @@ impl App {
                 self.notifications = !self.notifications;
                 self.cfg.notifications = self.notifications;
                 self.cfg.save_state();
-                self.toast(if self.notifications { "Уведомления включены" } else { "Уведомления выключены" });
+                self.toast(if self.notifications {
+                    "Уведомления включены"
+                } else {
+                    "Уведомления выключены"
+                });
             }
             Action::ToggleSound => {
                 self.cfg.sound = !self.cfg.sound;
                 self.cfg.save_state();
-                self.toast(if self.cfg.sound { "Звук уведомлений включён" } else { "Звук уведомлений выключен" });
+                self.toast(if self.cfg.sound {
+                    "Звук уведомлений включён"
+                } else {
+                    "Звук уведомлений выключен"
+                });
             }
             Action::TogglePopups => {
                 self.cfg.popups = !self.cfg.popups;
@@ -1333,7 +1278,11 @@ impl App {
                     let n = text.chars().count();
                     if n > 0 {
                         let ok = crate::clipboard::copy(&text);
-                        self.toast(if ok { format!("Скопировано: {n} симв.") } else { "Не удалось скопировать".to_string() });
+                        self.toast(if ok {
+                            format!("Скопировано: {n} симв.")
+                        } else {
+                            "Не удалось скопировать".to_string()
+                        });
                     }
                 }
             }
@@ -1399,13 +1348,22 @@ impl App {
     fn open_palette(&mut self) {
         let k = &self.cfg.keys;
         let hint = |a: Action, nav: &str| k.direct_label(a).unwrap_or_else(|| nav.to_string());
-        let mut e = vec![PaletteEntry { title: "Новый агент".into(), hint: "n".into(), action: Action::NewAgent }];
+        let mut e =
+            vec![PaletteEntry { title: "Новый агент".into(), hint: "n".into(), action: Action::NewAgent }];
         for i in self.visible_agents(false) {
             let d = &self.cfg.agents[i];
-            e.push(PaletteEntry { title: format!("Новый: {}", d.name), hint: String::new(), action: Action::NewAgentOf(i) });
+            e.push(PaletteEntry {
+                title: format!("Новый: {}", d.name),
+                hint: String::new(),
+                action: Action::NewAgentOf(i),
+            });
         }
         if !self.sessions.is_empty() {
-            e.push(PaletteEntry { title: "Новый агент того же типа в этой папке".into(), hint: "N".into(), action: Action::NewHere });
+            e.push(PaletteEntry {
+                title: "Новый агент того же типа в этой папке".into(),
+                hint: "N".into(),
+                action: Action::NewHere,
+            });
             for (i, s) in self.sessions.iter().enumerate() {
                 e.push(PaletteEntry {
                     title: format!("Перейти: {} · {}", s.name, s.agent),
@@ -1429,15 +1387,24 @@ impl App {
                 e.push(PaletteEntry { title: t.into(), hint: hint(a, nav), action: a });
             }
         }
-        e.push(PaletteEntry { title: "Сетка / один агент".into(), hint: "g".into(), action: Action::ToggleGrid });
-        e.push(PaletteEntry { title: "Все уведомления: вкл/выкл".into(), hint: "M".into(), action: Action::ToggleNotifications });
+        e.push(PaletteEntry {
+            title: "Сетка / один агент".into(), hint: "g".into(), action: Action::ToggleGrid
+        });
+        e.push(PaletteEntry {
+            title: "Все уведомления: вкл/выкл".into(),
+            hint: "M".into(),
+            action: Action::ToggleNotifications,
+        });
         e.push(PaletteEntry {
             title: format!("Звук уведомлений: {}", if self.cfg.sound { "вкл → выключить" } else { "выкл → включить" }),
             hint: String::new(),
             action: Action::ToggleSound,
         });
         e.push(PaletteEntry {
-            title: format!("Всплывающие окошки: {}", if self.cfg.popups { "вкл → выключить" } else { "выкл → включить" }),
+            title: format!(
+                "Всплывающие окошки: {}",
+                if self.cfg.popups { "вкл → выключить" } else { "выкл → включить" }
+            ),
             hint: String::new(),
             action: Action::TogglePopups,
         });
@@ -1449,8 +1416,16 @@ impl App {
                 action: Action::SetTheme(i),
             });
         }
-        e.push(PaletteEntry { title: "Настройки: тема оформления, звук, ширина списка".into(), hint: ",".into(), action: Action::Settings });
-        e.push(PaletteEntry { title: "Изменения выбранного агента (git diff)".into(), hint: "v".into(), action: Action::Diff });
+        e.push(PaletteEntry {
+            title: "Настройки: тема оформления, звук, ширина списка".into(),
+            hint: ",".into(),
+            action: Action::Settings,
+        });
+        e.push(PaletteEntry {
+            title: "Изменения выбранного агента (git diff)".into(),
+            hint: "v".into(),
+            action: Action::Diff,
+        });
         e.push(PaletteEntry { title: "Лента событий".into(), hint: "l".into(), action: Action::Log });
         for i in self.approvable() {
             let s = &self.sessions[i];
@@ -1461,17 +1436,47 @@ impl App {
             });
         }
         if self.sessions.get(self.selected).map(|s| s.git.is_some()).unwrap_or(false) {
-            e.push(PaletteEntry { title: "Git: закоммитить изменения агента".into(), hint: String::new(), action: Action::GitCommit });
-            e.push(PaletteEntry { title: "Git: отправить ветку (push)".into(), hint: String::new(), action: Action::GitPush });
+            e.push(PaletteEntry {
+                title: "Git: закоммитить изменения агента".into(),
+                hint: String::new(),
+                action: Action::GitCommit,
+            });
+            e.push(PaletteEntry {
+                title: "Git: отправить ветку (push)".into(),
+                hint: String::new(),
+                action: Action::GitPush,
+            });
             if self.sessions[self.selected].worktree.is_some() {
-                e.push(PaletteEntry { title: "Git: влить ветку агента в основную".into(), hint: String::new(), action: Action::GitMerge });
-                e.push(PaletteEntry { title: "Git: удалить worktree агента".into(), hint: String::new(), action: Action::GitRemoveWorktree });
+                e.push(PaletteEntry {
+                    title: "Git: влить ветку агента в основную".into(),
+                    hint: String::new(),
+                    action: Action::GitMerge,
+                });
+                e.push(PaletteEntry {
+                    title: "Git: удалить worktree агента".into(),
+                    hint: String::new(),
+                    action: Action::GitRemoveWorktree,
+                });
             }
         }
-        e.push(PaletteEntry { title: "Интеграции агентов: точные статусы через хуки".into(), hint: String::new(), action: Action::Integrations });
-        e.push(PaletteEntry { title: "Помощь и горячие клавиши".into(), hint: "?".into(), action: Action::Help });
-        e.push(PaletteEntry { title: "Выйти из Radar (агенты продолжат работать)".into(), hint: "q".into(), action: Action::Quit });
-        e.push(PaletteEntry { title: "Остановить всех агентов и выйти".into(), hint: "Q".into(), action: Action::QuitStop });
+        e.push(PaletteEntry {
+            title: "Интеграции агентов: точные статусы через хуки".into(),
+            hint: String::new(),
+            action: Action::Integrations,
+        });
+        e.push(PaletteEntry {
+            title: "Помощь и горячие клавиши".into(), hint: "?".into(), action: Action::Help
+        });
+        e.push(PaletteEntry {
+            title: "Выйти из Radar (агенты продолжат работать)".into(),
+            hint: "q".into(),
+            action: Action::Quit,
+        });
+        e.push(PaletteEntry {
+            title: "Остановить всех агентов и выйти".into(),
+            hint: "Q".into(),
+            action: Action::QuitStop,
+        });
         self.mode = Mode::Palette(Palette { input: TextField::default(), entries: e, sel: 0 });
     }
 
@@ -1505,7 +1510,11 @@ impl App {
         }
         items.push(restart);
         items.push(MenuItem::new(
-            if s.muted { "Включить уведомления агента" } else { "Выключить уведомления агента" },
+            if s.muted {
+                "Включить уведомления агента"
+            } else {
+                "Выключить уведомления агента"
+            },
             Action::ToggleMute,
             "m",
         ));
@@ -1548,13 +1557,21 @@ impl App {
             MenuItem::sep(),
             MenuItem::new(if self.grid { "Один агент" } else { "Сетка" }, Action::ToggleGrid, "g"),
             MenuItem::new(
-                if self.notifications { "Выключить все уведомления" } else { "Включить все уведомления" },
+                if self.notifications {
+                    "Выключить все уведомления"
+                } else {
+                    "Включить все уведомления"
+                },
                 Action::ToggleNotifications,
                 "M",
             ),
             MenuItem::new(if self.cfg.sound { "Выключить звук" } else { "Включить звук" }, Action::ToggleSound, ""),
             MenuItem::new(
-                if self.cfg.popups { "Выключить всплывающие окошки" } else { "Включить всплывающие окошки" },
+                if self.cfg.popups {
+                    "Выключить всплывающие окошки"
+                } else {
+                    "Включить всплывающие окошки"
+                },
                 Action::TogglePopups,
                 "",
             ),
@@ -1838,16 +1855,16 @@ impl App {
             .map(|(i, a)| {
                 let id = ig::key(&a.command);
                 IntegrationRow {
-                name: a.name.clone(),
-                state: ig::supported(&id).then(|| ig::state(&id)),
-                found: self.agent_available(i),
-                path: if ig::supported(&id) {
-                    ig::describe(&id)
-                } else {
-                    "интеграции нет: статусы определяются по экрану".into()
-                },
-                id,
-            }
+                    name: a.name.clone(),
+                    state: ig::supported(&id).then(|| ig::state(&id)),
+                    found: self.agent_available(i),
+                    path: if ig::supported(&id) {
+                        ig::describe(&id)
+                    } else {
+                        "интеграции нет: статусы определяются по экрану".into()
+                    },
+                    id,
+                }
             })
             .collect()
     }
@@ -2154,7 +2171,8 @@ impl App {
         if s.status != Status::Waiting {
             return Err("Агент ничего не просит: он не в статусе «ждёт ответа»".into());
         }
-        let enabled = self.cfg.agents.iter().find(|d| d.name == s.agent).map(|d| !d.approve.is_empty()).unwrap_or(false);
+        let enabled =
+            self.cfg.agents.iter().find(|d| d.name == s.agent).map(|d| !d.approve.is_empty()).unwrap_or(false);
         if !enabled {
             return Err(format!("Для «{}» подтверждение из списка не включено (approve в config.toml)", s.agent));
         }
@@ -2219,7 +2237,8 @@ impl App {
                 self.sessions[i].send_raw(&arrow);
             }
             if let Some(&line) = opts.get(sel) {
-                let text = excerpt[line].trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c)).to_string();
+                let text =
+                    excerpt[line].trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c)).to_string();
                 answer = format!("ответ — {text}");
             }
         }
@@ -2230,12 +2249,10 @@ impl App {
 
     fn key_confirm(&mut self, c: Confirm, k: KeyEvent) {
         if let Confirm::Approve(i, note, sel) = c {
-            let n = self
-                .sessions
-                .get(i)
-                .map(|s| crate::session::option_lines(&s.prompt_excerpt()).0.len())
-                .unwrap_or(0);
-            let keep = |app: &mut Self, sel: Option<usize>| app.mode = Mode::Confirm(Confirm::Approve(i, note.clone(), sel));
+            let n =
+                self.sessions.get(i).map(|s| crate::session::option_lines(&s.prompt_excerpt()).0.len()).unwrap_or(0);
+            let keep =
+                |app: &mut Self, sel: Option<usize>| app.mode = Mode::Confirm(Confirm::Approve(i, note.clone(), sel));
             match k.code {
                 KeyCode::Down | KeyCode::Char('j') if n > 0 => keep(self, Some((sel.unwrap_or(0) + 1).min(n - 1))),
                 KeyCode::Up | KeyCode::Char('k') if n > 0 => keep(self, Some(sel.unwrap_or(0).saturating_sub(1))),
@@ -2285,12 +2302,10 @@ impl App {
     fn key_group_form(&mut self, mut f: GroupForm, k: KeyEvent) {
         match k.code {
             KeyCode::Esc => return,
-            KeyCode::Enter => {
-                match self.save_group_form(&f) {
-                    Ok(()) => return,
-                    Err(e) => self.toast(e),
-                }
-            }
+            KeyCode::Enter => match self.save_group_form(&f) {
+                Ok(()) => return,
+                Err(e) => self.toast(e),
+            },
             KeyCode::Tab | KeyCode::BackTab => f.focus = 1 - f.focus,
             KeyCode::Down if f.focus == 0 => f.focus = 1,
             KeyCode::Up if f.focus == 1 && f.cursor == 0 => f.focus = 0,
@@ -2466,7 +2481,10 @@ impl App {
             }
             return;
         }
-        if matches!(self.mode, Mode::Confirm(_) | Mode::Rename(_) | Mode::Commit(_) | Mode::GroupForm(_) | Mode::Palette(_)) {
+        if matches!(
+            self.mode,
+            Mode::Confirm(_) | Mode::Rename(_) | Mode::Commit(_) | Mode::GroupForm(_) | Mode::Palette(_)
+        ) {
             if m.kind == MouseEventKind::Down(MouseButton::Left) {
                 self.mouse_modal(x, y);
             }
@@ -2487,9 +2505,7 @@ impl App {
         match m.kind {
             // правая кнопка (и Ctrl+клик, как в macOS) — контекстное меню Radar
             MouseEventKind::Down(MouseButton::Right) => self.context_menu(x, y),
-            MouseEventKind::Down(MouseButton::Left) if mods.contains(KeyModifiers::CONTROL) => {
-                self.context_menu(x, y)
-            }
+            MouseEventKind::Down(MouseButton::Left) if mods.contains(KeyModifiers::CONTROL) => self.context_menu(x, y),
             // граница списка и окна агента: тянем мышью (как в Herdr)
             MouseEventKind::Down(MouseButton::Left) if self.on_divider(x, y) => {
                 self.mode = Mode::Normal;
@@ -2635,7 +2651,11 @@ impl App {
                 } else {
                     let n = text.chars().count();
                     let ok = crate::clipboard::copy(&text);
-                    self.toast(if ok { format!("Скопировано: {n} симв.") } else { "Не удалось скопировать".to_string() });
+                    self.toast(if ok {
+                        format!("Скопировано: {n} симв.")
+                    } else {
+                        "Не удалось скопировать".to_string()
+                    });
                 }
             }
             None => {

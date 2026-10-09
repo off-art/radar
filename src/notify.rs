@@ -153,7 +153,10 @@ fn app_ready() -> bool {
 fn plist_set(plist: &Path, key: &str, kind: &str, value: &str) {
     let pb = "/usr/libexec/PlistBuddy";
     let target = plist.to_string_lossy().to_string();
-    if quiet(Command::new(pb).args(["-c", &format!("Set :{key} {value}"), &target])).map(|s| !s.success()).unwrap_or(true) {
+    if quiet(Command::new(pb).args(["-c", &format!("Set :{key} {value}"), &target]))
+        .map(|s| !s.success())
+        .unwrap_or(true)
+    {
         let _ = quiet(Command::new(pb).args(["-c", &format!("Add :{key} {kind} {value}"), &target]));
     }
 }
@@ -193,9 +196,11 @@ pub fn build_helper() -> Result<(), String> {
     let _ = quiet(Command::new("codesign").args(["--force", "--deep", "--sign", "-"]).arg(&app));
     let _ = quiet(Command::new("touch").arg(&app));
     let _ = quiet(
-        Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
-            .arg("-f")
-            .arg(&app),
+        Command::new(
+            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+        )
+        .arg("-f")
+        .arg(&app),
     );
     std::fs::write(dir.join("notifier.stamp"), stamp()).map_err(|e| e.to_string())?;
     Ok(())
@@ -233,10 +238,7 @@ fn send_via_helper(title: &str, body: &str) -> bool {
     if std::fs::create_dir_all(&q).is_err() {
         return false;
     }
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let file = q.join(format!("{stamp:032}.json"));
     let json = format!("{{\"title\":{},\"body\":{}}}", json_escape(title), json_escape(body));
     if std::fs::write(&file, json).is_err() {
@@ -300,9 +302,24 @@ pub fn preview(s: &Settings) {
 /// Для `radar doctor`: в каком состоянии уведомления.
 pub fn status_line() -> String {
     if !is_mac() {
-        let has = |c: &str| Command::new("sh").args(["-c", &format!("command -v {c}")]).stdout(Stdio::null()).stderr(Stdio::null()).status().map_or(false, |s| s.success());
-        let n = if has("notify-send") { "notify-send ок" } else { "notify-send не найден (sudo apt install libnotify-bin)" };
-        let a = if has("paplay") || has("aplay") { "звук ок" } else { "звук: нет paplay/aplay (sudo apt install pulseaudio-utils)" };
+        let has = |c: &str| {
+            Command::new("sh")
+                .args(["-c", &format!("command -v {c}")])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_or(false, |s| s.success())
+        };
+        let n = if has("notify-send") {
+            "notify-send ок"
+        } else {
+            "notify-send не найден (sudo apt install libnotify-bin)"
+        };
+        let a = if has("paplay") || has("aplay") {
+            "звук ок"
+        } else {
+            "звук: нет paplay/aplay (sudo apt install pulseaudio-utils)"
+        };
         return format!("{n}; {a}");
     }
     if app_ready() {

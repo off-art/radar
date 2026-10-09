@@ -182,7 +182,9 @@ pub fn run(raw: &[String]) -> Result<i32> {
         "new" => {
             let agent = a.pos.first().ok_or_else(|| anyhow!("укажите агента: radar ctl new claude [папка]"))?;
             let dir = match a.pos.get(1) {
-                Some(d) => std::fs::canonicalize(crate::app::expand_tilde(d)).with_context(|| format!("нет папки {d}"))?,
+                Some(d) => {
+                    std::fs::canonicalize(crate::app::expand_tilde(d)).with_context(|| format!("нет папки {d}"))?
+                }
                 None => std::env::current_dir()?,
             };
             let v = request(
@@ -279,7 +281,8 @@ mod tests {
 
     #[test]
     fn args_parse() {
-        let raw: Vec<String> = ["claude", "/tmp", "--name", "x y", "--worktree"].iter().map(|s| s.to_string()).collect();
+        let raw: Vec<String> =
+            ["claude", "/tmp", "--name", "x y", "--worktree"].iter().map(|s| s.to_string()).collect();
         let a = Args::parse(&raw, &["name"]);
         assert_eq!(a.pos, vec!["claude", "/tmp"]);
         assert_eq!(a.value("name"), Some("x y"));

@@ -111,11 +111,7 @@ pub fn default_shell() -> String {
             return s;
         }
     }
-    ["/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"]
-        .into_iter()
-        .find(|p| ok(p))
-        .unwrap_or("/bin/sh")
-        .to_string()
+    ["/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"].into_iter().find(|p| ok(p)).unwrap_or("/bin/sh").to_string()
 }
 
 pub fn shq(s: &str) -> String {
@@ -149,11 +145,7 @@ pub fn find_binary(bin: &str) -> Option<String> {
         .filter(|o| o.status.success())
         // шелл может напечатать приветствие — путь всегда в последней строке
         .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(str::trim)
-                .rfind(|l| l.starts_with('/'))
-                .map(str::to_string)
+            String::from_utf8_lossy(&o.stdout).lines().map(str::trim).rfind(|l| l.starts_with('/')).map(str::to_string)
         })
 }
 
@@ -229,10 +221,16 @@ impl Session {
                 (sv("TERM_PROGRAM"), sv("radar")),
                 (sv("SHELL_SESSIONS_DISABLE"), sv("1")),
             ],
-            env_remove: ["CLAUDECODE", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "ITERM_SESSION_ID", "WARP_SESSION_ID"]
-                .iter()
-                .map(|k| k.to_string())
-                .collect(),
+            env_remove: [
+                "CLAUDECODE",
+                "TERM_PROGRAM_VERSION",
+                "TERM_SESSION_ID",
+                "ITERM_SESSION_ID",
+                "WARP_SESSION_ID",
+            ]
+            .iter()
+            .map(|k| k.to_string())
+            .collect(),
             meta: crate::host::Meta {
                 id,
                 name,
@@ -389,11 +387,8 @@ impl Session {
 
     /// Прокрутка истории (вверх — к старому), с ограничением реальной длиной истории.
     pub fn scroll_by(&mut self, up: bool, lines: usize) {
-        self.scroll = if up {
-            (self.scroll + lines).min(self.max_scrollback())
-        } else {
-            self.scroll.saturating_sub(lines)
-        };
+        self.scroll =
+            if up { (self.scroll + lines).min(self.max_scrollback()) } else { self.scroll.saturating_sub(lines) };
     }
 
     /// Сырые байты агенту (события мыши и т. п.), без побочных эффектов ввода.
@@ -518,10 +513,7 @@ impl Session {
         let p = self.parser.lock().unwrap();
         let screen = p.screen();
         let (_, cols) = screen.size();
-        let rows: Vec<String> = screen
-            .rows(0, cols)
-            .filter(|r| !r.trim().is_empty())
-            .collect();
+        let rows: Vec<String> = screen.rows(0, cols).filter(|r| !r.trim().is_empty()).collect();
         let start = rows.len().saturating_sub(16);
         rows[start..].join("\n")
     }
@@ -544,11 +536,7 @@ impl Session {
             return None;
         }
         let tail = self.tail_text();
-        let sig = Signals {
-            tail: &tail,
-            since_activity: self.last_activity.elapsed(),
-            submitted: self.submitted,
-        };
+        let sig = Signals { tail: &tail, since_activity: self.last_activity.elapsed(), submitted: self.submitted };
         let next = status::decide(self.status, &sig);
         self.set_status(next)
     }
@@ -694,11 +682,8 @@ pub fn option_lines(excerpt: &[String]) -> (Vec<usize>, Option<usize>) {
 }
 
 pub fn excerpt(rows: &[String]) -> Vec<String> {
-    let lines: Vec<String> = rows
-        .iter()
-        .map(|r| r.trim_matches(is_frame_char).to_string())
-        .filter(|r| !r.is_empty())
-        .collect();
+    let lines: Vec<String> =
+        rows.iter().map(|r| r.trim_matches(is_frame_char).to_string()).filter(|r| !r.is_empty()).collect();
     let first_option = |s: &String| {
         let t = s.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
         let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();

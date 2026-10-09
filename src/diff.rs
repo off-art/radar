@@ -81,10 +81,7 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
     for raw in text.lines() {
         if let Some(rest) = raw.strip_prefix("diff --git ") {
             // «a/путь b/путь»; берём вторую половину
-            let path = rest
-                .rsplit_once(" b/")
-                .map(|(_, p)| p.to_string())
-                .unwrap_or_else(|| rest.to_string());
+            let path = rest.rsplit_once(" b/").map(|(_, p)| p.to_string()).unwrap_or_else(|| rest.to_string());
             files.push(FileDiff { path, status: 'M', added: 0, removed: 0, lines: vec![] });
             in_hunk = false;
             continue;
@@ -108,7 +105,9 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
         }
         if f.lines.len() >= MAX_LINES_PER_FILE {
             if f.lines.last().map(|l| l.kind) != Some(Kind::Meta) {
-                f.lines.push(Line { kind: Kind::Meta, text: "… дальше слишком много строк, показано не всё".into() });
+                f.lines.push(Line {
+                    kind: Kind::Meta, text: "… дальше слишком много строк, показано не всё".into()
+                });
             }
             // продолжаем считать +/−
             if raw.starts_with('+') {
@@ -159,7 +158,11 @@ fn untracked(dir: &Path) -> Vec<FileDiff> {
                 }
                 _ => f.lines.push(Line { kind: Kind::Meta, text: "двоичный файл".into() }),
             },
-            Ok(m) if m.is_file() => f.lines.push(Line { kind: Kind::Meta, text: "файл слишком большой для просмотра".into() }),
+            Ok(m) if m.is_file() => {
+                f.lines.push(Line {
+                    kind: Kind::Meta, text: "файл слишком большой для просмотра".into()
+                })
+            }
             _ => f.lines.push(Line { kind: Kind::Meta, text: "не удалось прочитать".into() }),
         }
         out.push(f);

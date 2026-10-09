@@ -23,7 +23,9 @@ fn subdirs(parent: &str, partial: &str) -> Vec<String> {
         .flatten()
         .filter(|e| e.path().is_dir()) // is_dir идёт по симлинкам
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.to_lowercase().starts_with(&partial.to_lowercase()) && (partial.starts_with('.') || !n.starts_with('.')))
+        .filter(|n| {
+            n.to_lowercase().starts_with(&partial.to_lowercase()) && (partial.starts_with('.') || !n.starts_with('.'))
+        })
         .collect();
     v.sort_by_key(|n| n.to_lowercase());
     v
@@ -90,7 +92,11 @@ mod tests {
     fn tmp() -> std::path::PathBuf {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static N: AtomicUsize = AtomicUsize::new(0);
-        let d = std::env::temp_dir().join(format!("radar-complete-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let d = std::env::temp_dir().join(format!(
+            "radar-complete-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         let _ = std::fs::remove_dir_all(&d);
         for n in ["alpha", "alpine", "beta", ".hidden"] {
             std::fs::create_dir_all(d.join(n)).unwrap();

@@ -108,10 +108,10 @@ pub fn run_update(check_only: bool) -> Result<()> {
         let tgz = tmp.join("radar.tar.gz");
         println!("Скачиваю…");
         run(
-            Command::new("curl").args(["-fsSL", "-o"]).arg(&tgz).arg(format!(
-                "https://github.com/{}/releases/download/v{latest}/radar-{t}.tar.gz",
-                repo()
-            )),
+            Command::new("curl")
+                .args(["-fsSL", "-o"])
+                .arg(&tgz)
+                .arg(format!("https://github.com/{}/releases/download/v{latest}/radar-{t}.tar.gz", repo())),
             "скачать архив релиза",
         )?;
         run(Command::new("tar").arg("xzf").arg(&tgz).arg("-C").arg(&tmp), "распаковать архив")?;

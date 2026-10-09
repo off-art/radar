@@ -137,7 +137,13 @@ pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String
     if ok {
         Ok(if so.is_empty() { se } else { so })
     } else {
-        Err(if !se.is_empty() { se } else if !so.is_empty() { so } else { "git завершился с ошибкой".into() })
+        Err(if !se.is_empty() {
+            se
+        } else if !so.is_empty() {
+            so
+        } else {
+            "git завершился с ошибкой".into()
+        })
     }
 }
 
@@ -227,10 +233,7 @@ pub struct Watcher {
 
 impl Watcher {
     pub fn start(tx: Sender<Msg>) -> Watcher {
-        let w = Watcher {
-            targets: Arc::new(Mutex::new(vec![])),
-            poke: Arc::new(AtomicBool::new(true)),
-        };
+        let w = Watcher { targets: Arc::new(Mutex::new(vec![])), poke: Arc::new(AtomicBool::new(true)) };
         let t = w.clone();
         std::thread::spawn(move || {
             let mut last = Instant::now() - Duration::from_secs(60);

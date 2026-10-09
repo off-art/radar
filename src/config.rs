@@ -118,16 +118,11 @@ pub struct Config {
 }
 
 pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".config")
-        .join("radar")
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".config").join("radar")
 }
 
 pub fn config_path() -> PathBuf {
-    std::env::var_os("RADAR_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| config_dir().join("config.toml"))
+    std::env::var_os("RADAR_CONFIG").map(PathBuf::from).unwrap_or_else(|| config_dir().join("config.toml"))
 }
 
 fn state_path() -> PathBuf {
@@ -267,11 +262,7 @@ impl Config {
             };
             let def = AgentDef {
                 id: slug(&a.name),
-                color: a
-                    .color
-                    .as_deref()
-                    .and_then(parse_color)
-                    .unwrap_or(Color::Rgb(148, 163, 184)),
+                color: a.color.as_deref().and_then(parse_color).unwrap_or(Color::Rgb(148, 163, 184)),
                 approve: match a.approve.as_deref() {
                     Some(s) => parse_approve(s),
                     None => default_approve(&a.command),
@@ -357,9 +348,7 @@ impl Config {
 
     pub fn find(&self, id: &str) -> Option<&AgentDef> {
         let id = id.to_lowercase();
-        self.agents
-            .iter()
-            .find(|a| a.id == id || a.command == id || a.name.to_lowercase() == id)
+        self.agents.iter().find(|a| a.id == id || a.command == id || a.name.to_lowercase() == id)
     }
 }
 
@@ -457,10 +446,9 @@ mod tests {
 
     #[test]
     fn keys_from_config() {
-        let raw: RawConfig = toml::from_str(
-            "[keys]\nprefix = \"ctrl+a\"\n[keys.direct]\n\"alt+n\" = \"new\"\n\"x+y\" = \"zzz\"",
-        )
-        .unwrap();
+        let raw: RawConfig =
+            toml::from_str("[keys]\nprefix = \"ctrl+a\"\n[keys.direct]\n\"alt+n\" = \"new\"\n\"x+y\" = \"zzz\"")
+                .unwrap();
         let k = raw.keys.unwrap();
         assert_eq!(k.prefix.as_deref(), Some("ctrl+a"));
         assert_eq!(k.direct.unwrap().len(), 2);

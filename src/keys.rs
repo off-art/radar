@@ -156,9 +156,7 @@ impl Chord {
             "pagedown" | "pgdn" | "pgdown" => KeyCode::PageDown,
             "home" => KeyCode::Home,
             "end" => KeyCode::End,
-            k if k.len() > 1 && k.starts_with('f') && k[1..].parse::<u8>().is_ok() => {
-                KeyCode::F(k[1..].parse().ok()?)
-            }
+            k if k.len() > 1 && k.starts_with('f') && k[1..].parse::<u8>().is_ok() => KeyCode::F(k[1..].parse().ok()?),
             k if k.chars().count() == 1 => KeyCode::Char(k.chars().next()?),
             _ => return None,
         };
@@ -178,8 +176,7 @@ impl Chord {
             KeyCode::Char(ch) => KeyCode::Char(ch.to_ascii_lowercase()),
             o => o,
         };
-        norm(k.code) == norm(self.code)
-            && strip(k.modifiers, k.code) == strip(self.mods, self.code)
+        norm(k.code) == norm(self.code) && strip(k.modifiers, k.code) == strip(self.mods, self.code)
     }
 
     /// Подпись для интерфейса: «Ctrl+b».
