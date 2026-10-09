@@ -8,6 +8,20 @@ use std::time::Duration;
 const SHORT: Duration = Duration::from_secs(30);
 const LONG: Duration = Duration::from_secs(90);
 
+/// Создаёт отдельный worktree с новой веткой `radar/<агент>-<метка>`, чтобы агенты не мешали друг другу.
+pub fn add_worktree(dir: &Path, agent_id: &str) -> Result<PathBuf, String> {
+    let top = exec(dir, &["rev-parse", "--show-toplevel"], SHORT).map_err(|_| "папка не в git-репозитории")?;
+    let top = PathBuf::from(top);
+    let repo = top.file_name().map_or_else(|| "repo".into(), |s| s.to_string_lossy().to_string());
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() % 100_000);
+    let slug = format!("{agent_id}-{stamp}");
+    let base = crate::paths::worktrees_dir();
+    std::fs::create_dir_all(&base).map_err(|e| format!("не удалось создать {}: {e}", base.display()))?;
+    let path = base.join(format!("{repo}-{slug}"));
+    exec(&top, &["worktree", "add", "-b", &format!("radar/{slug}"), &path.to_string_lossy()], SHORT)?;
+    Ok(path)
+}
+
 /// Добавляет все изменения и делает коммит.
 pub fn commit(dir: &Path, message: &str) -> Result<String, String> {
     let message = message.trim();
@@ -83,25 +97,11 @@ pub fn remove_worktree(worktree: &Path, branch: &str) -> Result<String, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{git, repo, TempDir};
 
-    fn git(dir: &Path, args: &[&str]) {
-        let st = std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(st.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&st.stderr));
-    }
-
-    fn setup(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("radar-ops-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        git(&d, &["init"]);
-        git(&d, &["config", "user.name", "t"]);
-        git(&d, &["config", "user.email", "t@t"]);
+    /// Репозиторий с одним коммитом (`a.txt`).
+    fn setup(tag: &str) -> TempDir {
+        let d = repo(tag);
         std::fs::write(d.join("a.txt"), "one\n").unwrap();
         git(&d, &["add", "."]);
         git(&d, &["commit", "-m", "first"]);
@@ -110,20 +110,19 @@ mod tests {
 
     #[test]
     fn commit_flow() {
-        let d = setup("commit");
+        let d = setup("ops-commit");
         assert!(commit(&d, "  ").is_err());
         std::fs::write(d.join("b.txt"), "new\n").unwrap();
         let out = commit(&d, "add b").unwrap();
         assert!(out.contains("add b"), "{out}");
         assert!(crate::git::query(&d).unwrap().files == 0);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn worktree_merge_and_remove() {
-        let main = setup("wt");
-        let wt = std::env::temp_dir().join(format!("radar-ops-wt-tree-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&wt);
+        let main = setup("ops-wt");
+        let scratch = TempDir::new("ops-wt-tree");
+        let wt = scratch.join("tree");
         git(&main, &["worktree", "add", "-b", "radar/x", &wt.to_string_lossy()]);
         assert_eq!(main_repo(&wt).unwrap().canonicalize().unwrap(), main.canonicalize().unwrap());
 
@@ -136,14 +135,13 @@ mod tests {
         let msg = remove_worktree(&wt, "radar/x").unwrap();
         assert!(msg.contains("удалены"), "{msg}");
         assert!(!wt.exists());
-        let _ = std::fs::remove_dir_all(&main);
     }
 
     #[test]
     fn merge_conflict_is_aborted() {
-        let main = setup("conflict");
-        let wt = std::env::temp_dir().join(format!("radar-ops-cf-tree-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&wt);
+        let main = setup("ops-conflict");
+        let scratch = TempDir::new("ops-cf-tree");
+        let wt = scratch.join("tree");
         git(&main, &["worktree", "add", "-b", "radar/c", &wt.to_string_lossy()]);
         std::fs::write(wt.join("a.txt"), "from worktree\n").unwrap();
         commit(&wt, "wt change").unwrap();
@@ -157,13 +155,11 @@ mod tests {
         // ветка не влита → remove сохраняет её
         let msg = remove_worktree(&wt, "radar/c").unwrap();
         assert!(msg.contains("сохранена"), "{msg}");
-        let _ = std::fs::remove_dir_all(&main);
     }
 
     #[test]
     fn push_without_remote_reports_error() {
-        let d = setup("push");
+        let d = setup("ops-push");
         assert!(push(&d).is_err());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

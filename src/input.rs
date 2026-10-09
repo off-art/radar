@@ -87,12 +87,7 @@ pub fn key_to_bytes(k: KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     };
 
     // Alt+символ / Alt+Enter / Alt+Backspace → ESC-префикс (как в большинстве терминалов).
-    if alt
-        && matches!(
-            k.code,
-            KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace | KeyCode::Tab
-        )
-    {
+    if alt && matches!(k.code, KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace | KeyCode::Tab) {
         out.insert(0, 0x1b);
     }
     Some(out)
@@ -181,21 +176,13 @@ mod tests {
     use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState};
 
     fn key(code: KeyCode, m: KeyModifiers) -> KeyEvent {
-        KeyEvent {
-            code,
-            modifiers: m,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        }
+        KeyEvent { code, modifiers: m, kind: KeyEventKind::Press, state: KeyEventState::NONE }
     }
 
     #[test]
     fn plain_and_unicode() {
         assert_eq!(key_to_bytes(key(KeyCode::Char('a'), KeyModifiers::NONE), false), Some(b"a".to_vec()));
-        assert_eq!(
-            key_to_bytes(key(KeyCode::Char('я'), KeyModifiers::NONE), false),
-            Some("я".as_bytes().to_vec())
-        );
+        assert_eq!(key_to_bytes(key(KeyCode::Char('я'), KeyModifiers::NONE), false), Some("я".as_bytes().to_vec()));
     }
 
     #[test]

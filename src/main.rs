@@ -1,8 +1,8 @@
 mod app;
 mod clipboard;
 mod complete;
-mod ctl;
 mod config;
+mod ctl;
 mod diff;
 mod events;
 mod git;
@@ -15,9 +15,13 @@ mod integrations;
 mod keys;
 mod menu;
 mod notify;
+mod paths;
 mod persist;
 mod session;
 mod status;
+mod sync;
+#[cfg(test)]
+mod testutil;
 mod textfield;
 mod theme;
 mod ui;
@@ -56,12 +60,11 @@ fn doctor() -> Result<()> {
     println!("Radar {}", env!("CARGO_PKG_VERSION"));
     println!("Конфиг: {}", config::config_path().display());
     println!();
-    for a in &cfg.agents {
-        let bin = a.command.split_whitespace().next().unwrap_or("");
-        let found = session::find_binary(bin);
+    let bins: Vec<&str> = cfg.agents.iter().map(config::AgentDef::bin).collect();
+    for (a, found) in cfg.agents.iter().zip(session::find_binaries(&bins)) {
         match found {
             Some(p) => println!("  ✓ {:<14} {}", a.name, p),
-            None => println!("  ✗ {:<14} не найден ({})", a.name, bin),
+            None => println!("  ✗ {:<14} не найден ({})", a.name, a.bin()),
         }
     }
     println!();
@@ -81,7 +84,7 @@ fn integration_cmd(args: &[String]) -> Result<()> {
     if matches!(act, Some("install") | Some("uninstall")) {
         let targets = &args[1..];
         let list: Vec<String> = if targets.iter().any(|t| t == "all") {
-            integrations::installable().iter().map(|s| s.to_string()).collect()
+            integrations::installable().iter().map(std::string::ToString::to_string).collect()
         } else if targets.is_empty() {
             eprintln!("radar integration {} <агент ...|all>", act.unwrap());
             std::process::exit(2);
@@ -119,7 +122,7 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("hook") => {
-            hook::run_client(args.get(1).map(String::as_str).unwrap_or(""));
+            hook::run_client(args.get(1).map_or("", String::as_str));
             return Ok(());
         }
         Some("-h") | Some("--help") | Some("help") => {
@@ -130,16 +133,14 @@ fn main() -> Result<()> {
             println!("radar {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Some("ctl") => {
-            match ctl::run(&args[1..]) {
-                Ok(0) => return Ok(()),
-                Ok(code) => std::process::exit(code),
-                Err(e) => {
-                    eprintln!("radar ctl: {e:#}");
-                    std::process::exit(1);
-                }
+        Some("ctl") => match ctl::run(&args[1..]) {
+            Ok(0) => return Ok(()),
+            Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("radar ctl: {e:#}");
+                std::process::exit(1);
             }
-        }
+        },
         Some("host") => return host::run_host(),
         Some("stop") => {
             let n = host::stop_all();
@@ -181,7 +182,7 @@ fn main() -> Result<()> {
     let mut start_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut autostart = vec![];
     for a in &args {
-        let p = app::expand_tilde(a);
+        let p = paths::expand_tilde(a);
         if p.is_dir() {
             start_dir = p.canonicalize().unwrap_or(p);
         } else if let Some(def) = cfg.find(a) {
@@ -196,10 +197,7 @@ fn main() -> Result<()> {
     let sock = hook::socket_path();
     hook::start_server(&sock, tx.clone())?;
     let claude_settings = hook::write_claude_settings().ok();
-    let ctx = session::SpawnCtx {
-        sock: sock.clone(),
-        claude_settings,
-    };
+    let ctx = session::SpawnCtx { sock: sock.clone(), claude_settings };
 
     let mut app = app::App::new(cfg, start_dir.clone(), tx, ctx);
     let mut errors = vec![];

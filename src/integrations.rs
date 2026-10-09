@@ -33,31 +33,12 @@ struct Spec {
     method: Method,
 }
 
-const QWEN_EVENTS: &[&str] = &[
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PostToolUse",
-    "Notification",
-    "PermissionRequest",
-    "Stop",
-];
-const CODEX_EVENTS: &[&str] = &[
-    "SessionStart",
-    "UserPromptSubmit",
-    "PreToolUse",
-    "PermissionRequest",
-    "PostToolUse",
-    "Stop",
-];
-const GEMINI_EVENTS: &[&str] = &[
-    "SessionStart",
-    "BeforeAgent",
-    "BeforeTool",
-    "AfterTool",
-    "AfterAgent",
-    "Notification",
-];
+const QWEN_EVENTS: &[&str] =
+    &["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "PermissionRequest", "Stop"];
+const CODEX_EVENTS: &[&str] =
+    &["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"];
+const GEMINI_EVENTS: &[&str] =
+    &["SessionStart", "BeforeAgent", "BeforeTool", "AfterTool", "AfterAgent", "Notification"];
 
 const SPECS: &[Spec] = &[
     Spec { id: "qwen", method: Method::JsonHooks(QWEN_EVENTS) },
@@ -87,10 +68,6 @@ pub fn installable() -> Vec<&'static str> {
     SPECS.iter().map(|s| s.id).collect()
 }
 
-fn home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
-}
-
 /// Файл, который правит интеграция.
 pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
     Some(match id {
@@ -98,10 +75,7 @@ pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
         // GigaCode — форк Qwen Code; в документации путь не указан, по умолчанию ~/.gigacode
         "gigacode" => home.join(".gigacode/settings.json"),
         "gemini" => home.join(".gemini/settings.json"),
-        "codex" => std::env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".codex"))
-            .join("hooks.json"),
+        "codex" => std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from).join("hooks.json"),
         "opencode" => home.join(".config/opencode/plugins/radar.js"),
         _ => return None,
     })
@@ -111,15 +85,15 @@ pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
 pub fn describe(id: &str) -> String {
     match id {
         "claude" => "встроено: хуки подключаются при каждом запуске".into(),
-        _ => match target_path(id, &home()) {
-            Some(p) => p.to_string_lossy().replacen(&*home().to_string_lossy(), "~", 1),
+        _ => match target_path(id, &crate::paths::home()) {
+            Some(p) => p.to_string_lossy().replacen(&*crate::paths::home().to_string_lossy(), "~", 1),
             None => "не поддерживается".into(),
         },
     }
 }
 
 pub fn state(id: &str) -> State {
-    state_in(id, &home())
+    state_in(id, &crate::paths::home())
 }
 
 fn state_in(id: &str, home: &Path) -> State {
@@ -134,20 +108,22 @@ fn state_in(id: &str, home: &Path) -> State {
     };
     let on = match sp.method {
         Method::OpenCodePlugin => text.contains(PLUGIN_MARK),
-        Method::JsonHooks(_) => serde_json::from_str::<Value>(&text)
-            .map(|v| has_radar_hooks(&v))
-            .unwrap_or(false),
+        Method::JsonHooks(_) => serde_json::from_str::<Value>(&text).is_ok_and(|v| has_radar_hooks(&v)),
     };
-    if on { State::Installed } else { State::NotInstalled }
+    if on {
+        State::Installed
+    } else {
+        State::NotInstalled
+    }
 }
 
 pub fn install(id: &str) -> Result<PathBuf> {
     let exe = std::env::current_exe().context("не удалось определить путь к radar")?;
-    install_in(id, &home(), &exe.to_string_lossy())
+    install_in(id, &crate::paths::home(), &exe.to_string_lossy())
 }
 
 pub fn uninstall(id: &str) -> Result<()> {
-    uninstall_in(id, &home())
+    uninstall_in(id, &crate::paths::home())
 }
 
 fn install_in(id: &str, home: &Path, exe: &str) -> Result<PathBuf> {
@@ -191,7 +167,7 @@ fn uninstall_in(id: &str, home: &Path) -> Result<()> {
             let mut root = read_json(&path)?;
             remove_hooks(&mut root);
             // файл создан нами и теперь пуст — убираем его целиком
-            if root.as_object().map(|o| o.is_empty()).unwrap_or(false) && !backup_path(&path).exists() {
+            if root.as_object().is_some_and(serde_json::Map::is_empty) && !backup_path(&path).exists() {
                 std::fs::remove_file(&path)?;
             } else {
                 std::fs::write(&path, serde_json::to_vec_pretty(&root)?)?;
@@ -222,8 +198,9 @@ fn backup_once(p: &Path) -> Result<()> {
 fn read_json(path: &Path) -> Result<Value> {
     match std::fs::read_to_string(path) {
         Ok(t) if t.trim().is_empty() => Ok(Value::Object(Map::new())),
-        Ok(t) => serde_json::from_str(&t)
-            .with_context(|| format!("{}: не удалось разобрать JSON (комментарии не поддерживаются) — файл не тронут", path.display())),
+        Ok(t) => serde_json::from_str(&t).with_context(|| {
+            format!("{}: не удалось разобрать JSON (комментарии не поддерживаются) — файл не тронут", path.display())
+        }),
         Err(_) => Ok(Value::Object(Map::new())),
     }
 }
@@ -231,15 +208,13 @@ fn read_json(path: &Path) -> Result<Value> {
 fn is_radar_group(g: &Value) -> bool {
     g.get("hooks")
         .and_then(|h| h.as_array())
-        .map(|h| h.iter().any(|x| x.get("name").and_then(|n| n.as_str()) == Some(MARK)))
-        .unwrap_or(false)
+        .is_some_and(|h| h.iter().any(|x| x.get("name").and_then(|n| n.as_str()) == Some(MARK)))
 }
 
 fn has_radar_hooks(root: &Value) -> bool {
     root.get("hooks")
         .and_then(|h| h.as_object())
-        .map(|h| h.values().any(|v| v.as_array().map(|a| a.iter().any(is_radar_group)).unwrap_or(false)))
-        .unwrap_or(false)
+        .is_some_and(|h| h.values().any(|v| v.as_array().is_some_and(|a| a.iter().any(is_radar_group))))
 }
 
 fn shq(s: &str) -> String {
@@ -269,7 +244,7 @@ fn remove_hooks(root: &mut Value) {
             a.retain(|g| !is_radar_group(g));
         }
     }
-    hooks.retain(|_, v| v.as_array().map(|a| !a.is_empty()).unwrap_or(true));
+    hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
     if hooks.is_empty() {
         obj.remove("hooks");
     }
@@ -319,12 +294,10 @@ export const RadarPlugin = async () => {{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::TempDir;
 
-    fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("radar-int-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn tmp(name: &str) -> TempDir {
+        TempDir::new(&format!("int-{name}"))
     }
 
     #[test]
@@ -343,7 +316,10 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
         assert_eq!(v["theme"], "dark");
-        assert!(v["hooks"]["Stop"][1]["hooks"][0]["command"].as_str().unwrap().starts_with("'/opt/my radar' hook Stop"));
+        assert!(v["hooks"]["Stop"][1]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .starts_with("'/opt/my radar' hook Stop"));
         assert!(backup_path(&p).exists());
 
         uninstall_in("qwen", &h).unwrap();

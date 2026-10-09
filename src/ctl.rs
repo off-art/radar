@@ -68,7 +68,7 @@ pub fn resolve(items: &[(u32, String)], target: &str) -> Result<u32, String> {
 
 /// Сокет работающего Radar: из `RADAR_SOCK` или самый свежий живой `radar-*.sock`.
 pub fn find_socket(explicit: Option<String>) -> Result<PathBuf> {
-    if let Some(p) = explicit.clone() {
+    if let Some(p) = explicit {
         return Ok(PathBuf::from(p));
     }
     // RADAR_SOCK внутри агента мог остаться от закрытого окна — берём, только если там кто-то слушает
@@ -182,7 +182,9 @@ pub fn run(raw: &[String]) -> Result<i32> {
         "new" => {
             let agent = a.pos.first().ok_or_else(|| anyhow!("укажите агента: radar ctl new claude [папка]"))?;
             let dir = match a.pos.get(1) {
-                Some(d) => std::fs::canonicalize(crate::app::expand_tilde(d)).with_context(|| format!("нет папки {d}"))?,
+                Some(d) => {
+                    std::fs::canonicalize(crate::paths::expand_tilde(d)).with_context(|| format!("нет папки {d}"))?
+                }
                 None => std::env::current_dir()?,
             };
             let v = request(
@@ -250,7 +252,7 @@ fn wait(sock: &PathBuf, t: &str, a: &Args) -> Result<i32> {
         } else {
             calm_since = None;
         }
-        if timeout.map_or(false, |t| start.elapsed().as_secs_f64() >= t) {
+        if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
             println!("{st}");
             return Ok(124);
         }
@@ -279,7 +281,8 @@ mod tests {
 
     #[test]
     fn args_parse() {
-        let raw: Vec<String> = ["claude", "/tmp", "--name", "x y", "--worktree"].iter().map(|s| s.to_string()).collect();
+        let raw: Vec<String> =
+            ["claude", "/tmp", "--name", "x y", "--worktree"].iter().map(|s| s.to_string()).collect();
         let a = Args::parse(&raw, &["name"]);
         assert_eq!(a.pos, vec!["claude", "/tmp"]);
         assert_eq!(a.value("name"), Some("x y"));

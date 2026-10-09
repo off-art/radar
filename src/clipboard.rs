@@ -8,7 +8,8 @@ fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for c in data.chunks(3) {
-        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        let n =
+            (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
         out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
@@ -18,7 +19,9 @@ fn base64(data: &[u8]) -> String {
 }
 
 fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
-    let Ok(mut child) = Command::new(cmd).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
+    let Ok(mut child) =
+        Command::new(cmd).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
+    else {
         return false;
     };
     if let Some(mut stdin) = child.stdin.take() {
@@ -26,16 +29,17 @@ fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
             return false;
         }
     }
-    child.wait().map(|s| s.success()).unwrap_or(false)
+    child.wait().is_ok_and(|s| s.success())
 }
 
 /// Linux: `wl-copy` (Wayland) или `xclip`/`xsel` (X11), если установлены; иначе остаётся OSC 52.
 fn linux_clipboard(text: &str) -> bool {
-    let has = |v: &str| std::env::var_os(v).map_or(false, |x| !x.is_empty());
+    let has = |v: &str| std::env::var_os(v).is_some_and(|x| !x.is_empty());
     if has("WAYLAND_DISPLAY") && pipe_to("wl-copy", &[], text) {
         return true;
     }
-    has("DISPLAY") && (pipe_to("xclip", &["-selection", "clipboard"], text) || pipe_to("xsel", &["--clipboard", "--input"], text))
+    has("DISPLAY")
+        && (pipe_to("xclip", &["-selection", "clipboard"], text) || pipe_to("xsel", &["--clipboard", "--input"], text))
 }
 
 /// Кладёт текст в буфер обмена. `true` — получилось (для OSC 52 это лишь «отправили терминалу»).

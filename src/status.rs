@@ -117,11 +117,7 @@ mod tests {
     use super::*;
 
     fn sig(tail: &str, ms: u64, submitted: bool) -> Signals<'_> {
-        Signals {
-            tail,
-            since_activity: Duration::from_millis(ms),
-            submitted,
-        }
+        Signals { tail, since_activity: Duration::from_millis(ms), submitted }
     }
 
     #[test]

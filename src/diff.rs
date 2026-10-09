@@ -48,7 +48,7 @@ impl View {
     }
 
     pub fn max_scroll(&self, height: usize) -> usize {
-        self.file().map(|f| f.lines.len().saturating_sub(height)).unwrap_or(0)
+        self.file().map_or(0, |f| f.lines.len().saturating_sub(height))
     }
 
     pub fn select(&mut self, i: usize) {
@@ -81,10 +81,7 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
     for raw in text.lines() {
         if let Some(rest) = raw.strip_prefix("diff --git ") {
             // «a/путь b/путь»; берём вторую половину
-            let path = rest
-                .rsplit_once(" b/")
-                .map(|(_, p)| p.to_string())
-                .unwrap_or_else(|| rest.to_string());
+            let path = rest.rsplit_once(" b/").map_or_else(|| rest.to_string(), |(_, p)| p.to_string());
             files.push(FileDiff { path, status: 'M', added: 0, removed: 0, lines: vec![] });
             in_hunk = false;
             continue;
@@ -108,7 +105,9 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
         }
         if f.lines.len() >= MAX_LINES_PER_FILE {
             if f.lines.last().map(|l| l.kind) != Some(Kind::Meta) {
-                f.lines.push(Line { kind: Kind::Meta, text: "… дальше слишком много строк, показано не всё".into() });
+                f.lines.push(Line {
+                    kind: Kind::Meta, text: "… дальше слишком много строк, показано не всё".into()
+                });
             }
             // продолжаем считать +/−
             if raw.starts_with('+') {
@@ -159,7 +158,11 @@ fn untracked(dir: &Path) -> Vec<FileDiff> {
                 }
                 _ => f.lines.push(Line { kind: Kind::Meta, text: "двоичный файл".into() }),
             },
-            Ok(m) if m.is_file() => f.lines.push(Line { kind: Kind::Meta, text: "файл слишком большой для просмотра".into() }),
+            Ok(m) if m.is_file() => {
+                f.lines.push(Line {
+                    kind: Kind::Meta, text: "файл слишком большой для просмотра".into()
+                })
+            }
             _ => f.lines.push(Line { kind: Kind::Meta, text: "не удалось прочитать".into() }),
         }
         out.push(f);
@@ -260,23 +263,8 @@ index 4..0
 
     #[test]
     fn loads_real_repository() {
-        use std::process::{Command, Stdio};
-        let d = std::env::temp_dir().join(format!("radar-diff-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let g = |args: &[&str]| {
-            assert!(Command::new("git")
-                .arg("-C")
-                .arg(&d)
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(args)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-                .success());
-        };
-        g(&["init"]);
+        let d = crate::testutil::repo("diff");
+        let g = |args: &[&str]| crate::testutil::git(&d, args);
         std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
         g(&["add", "."]);
         g(&["commit", "-m", "first"]);
@@ -286,6 +274,5 @@ index 4..0
         assert_eq!(files.len(), 2);
         assert_eq!((files[0].path.as_str(), files[0].status, files[0].added, files[0].removed), ("a.txt", 'M', 2, 1));
         assert_eq!((files[1].path.as_str(), files[1].status, files[1].added), ("b.txt", '?', 1));
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

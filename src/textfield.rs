@@ -23,7 +23,7 @@ impl TextField {
         self.chars.is_empty()
     }
 
-        pub fn cursor(&self) -> usize {
+    pub fn cursor(&self) -> usize {
         self.cur
     }
 

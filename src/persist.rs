@@ -3,7 +3,7 @@
 //! Процессы агентов при закрытии Radar завершаются, поэтому восстанавливается сам список:
 //! агент, папка, имя, режим «без уведомлений». Claude Code продолжает прежний диалог.
 
-use crate::config::config_dir;
+use crate::paths::config_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -59,10 +59,7 @@ pub fn save_text(text: &str) {
 }
 
 pub fn load() -> File {
-    std::fs::read_to_string(path())
-        .ok()
-        .and_then(|t| toml::from_str(&t).ok())
-        .unwrap_or_default()
+    std::fs::read_to_string(path()).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -74,8 +71,22 @@ mod tests {
         let f = File {
             selected: 1,
             sessions: vec![
-                Saved { agent: "Claude Code".into(), dir: "/a b".into(), name: "api".into(), resume: Some("abc".into()), ..Default::default() },
-                Saved { agent: "Codex".into(), dir: "/x".into(), name: "x #2".into(), muted: true, worktree: Some("/w".into()), resume: None, group: Some("Фронт".into()) },
+                Saved {
+                    agent: "Claude Code".into(),
+                    dir: "/a b".into(),
+                    name: "api".into(),
+                    resume: Some("abc".into()),
+                    ..Default::default()
+                },
+                Saved {
+                    agent: "Codex".into(),
+                    dir: "/x".into(),
+                    name: "x #2".into(),
+                    muted: true,
+                    worktree: Some("/w".into()),
+                    resume: None,
+                    group: Some("Фронт".into()),
+                },
             ],
             groups: vec!["Фронт".into(), "пустая".into()],
             collapsed: vec!["api".into()],

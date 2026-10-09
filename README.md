@@ -448,6 +448,7 @@ sound = true
 popups = true         # всплывающие уведомления (звук от них не зависит)
 restore = true        # восстанавливать список агентов при запуске
 sidebar_width = 0     # ширина списка агентов, 0 — автоматически (можно тянуть мышью за границу)
+scrollback = 5000     # глубина прокрутки назад, строк на агента (≈15 МБ на агента при 100 колонках)
 sound_theme = "bell"  # bell, sonar, retro, harp, knock, thump, drop
 volume = 0.6          # громкость уведомлений, 0.0–1.0
 mouse = true          # false — родное выделение терминала вместо выделения Radar (см. «Копирование текста»)
@@ -494,11 +495,22 @@ cargo test                # тесты
 cargo build --release     # релизная сборка → target/release/radar
 ```
 
-Структура: `src/app.rs` — состояние и события, `src/session.rs` — pty и конечный автомат статусов,
-`src/status.rs` — эвристика, `src/hook.rs` — хуки Claude Code, `src/integrations.rs` — хуки/плагины других агентов,
-`src/persist.rs` — сохранение списка агентов, `src/theme.rs` — цветовые схемы, `src/config.rs` — конфиг и состояние, `src/textfield.rs` — поля ввода, `src/ui.rs` — отрисовка, `src/input.rs` — клавиши и мышь → байты pty,
-`src/keys.rs` — действия и сочетания, `src/menu.rs` — меню и палитра, `src/notify.rs` — уведомления и звук,
-`assets/` — иконка и звуки (`python3 assets/gen_sounds.py` пересоздаёт звуки).
+Перед коммитом: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test` (то же проверяет CI).
+
+Структура `src/`:
+
+- `main.rs` — точка входа и подкоманды (`host`, `hook`, `ctl`, `doctor`, `integration`, …), `ctl.rs` — клиент `radar ctl`, `groups.rs` — модель групп;
+- `app/` — состояние и события окна: `mod.rs` (типы и `App`), `run.rs` (главный цикл), `sessions.rs`, `groups.rs`,
+  `layout.rs`, `attention.rs` (статусы, тики, уведомления), `keys.rs`, `mouse.rs`, `actions.rs`, `settings.rs`,
+  `git_actions.rs`, `views.rs`, `approve.rs`, `remote.rs` (`radar ctl`);
+- `ui/` — отрисовка (ratatui): `sidebar`, `panes`, `statusbar`, `popup`, `form`, `overlays`, `settings`, `diff`;
+- `session.rs` — pty и конечный автомат статусов, `status.rs` — эвристика, `host.rs` — фоновый хозяин агента;
+- `hook.rs`, `integrations.rs` — хуки и плагины агентов; `events.rs` — журнал событий;
+- `git.rs`, `gitops.rs`, `diff.rs` — git (запуск с таймаутом, наблюдатель, worktree, коммит/push, diff);
+- `config.rs`, `persist.rs`, `paths.rs` — настройки, сохранённый список агентов, каталоги;
+- `theme.rs`, `keys.rs`, `input.rs`, `menu.rs`, `textfield.rs`, `complete.rs`, `notify.rs`, `clipboard.rs`, `update.rs`,
+  `sync.rs` (мьютексы без паники), `testutil.rs` (помощники тестов);
+- `assets/` — иконка и звуки (`python3 assets/gen_sounds.py` пересоздаёт звуки).
 
 ## Лицензия
 

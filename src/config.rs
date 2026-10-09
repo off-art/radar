@@ -28,6 +28,13 @@ pub struct AgentDef {
     pub approve: Vec<u8>,
 }
 
+impl AgentDef {
+    /// Имя исполняемого файла: первое слово команды.
+    pub fn bin(&self) -> &str {
+        self.command.split_whitespace().next().unwrap_or("")
+    }
+}
+
 /// Ответ «разрешить» по умолчанию: включён для Claude Code и Qwen Code (Enter на пункте «Yes», проверено),
 /// остальным агентам включается в config.toml (`approve = "y"`).
 fn default_approve(command: &str) -> Vec<u8> {
@@ -84,11 +91,15 @@ struct RawConfig {
     sound_waiting: Option<String>,
     mouse: Option<bool>,
     sidebar_width: Option<u16>,
+    scrollback: Option<usize>,
     theme: Option<RawTheme>,
     keys: Option<RawKeys>,
     #[serde(default)]
     agent: Vec<RawAgent>,
 }
+
+/// Глубина прокрутки назад по умолчанию, строк на агента.
+pub const DEFAULT_SCROLLBACK: usize = 5000;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -109,6 +120,8 @@ pub struct Config {
     pub mouse: bool,
     /// Ширина списка агентов; 0 — автоматически.
     pub sidebar_width: u16,
+    /// Глубина прокрутки назад в строках на агента (память ≈ строки × ширина окна).
+    pub scrollback: usize,
     pub theme_name: String,
     pub theme_custom: BTreeMap<String, String>,
     pub keys: Keys,
@@ -117,21 +130,12 @@ pub struct Config {
     pub warnings: Vec<String>,
 }
 
-pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".config")
-        .join("radar")
-}
-
 pub fn config_path() -> PathBuf {
-    std::env::var_os("RADAR_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| config_dir().join("config.toml"))
+    std::env::var_os("RADAR_CONFIG").map_or_else(|| crate::paths::config_dir().join("config.toml"), PathBuf::from)
 }
 
 fn state_path() -> PathBuf {
-    config_dir().join("state.toml")
+    crate::paths::config_dir().join("state.toml")
 }
 
 #[derive(Deserialize, Default)]
@@ -200,6 +204,7 @@ impl Config {
             sound_waiting: None,
             mouse: true,
             sidebar_width: 0,
+            scrollback: DEFAULT_SCROLLBACK,
             theme_name: crate::theme::DEFAULT.to_string(),
             theme_custom: BTreeMap::new(),
             keys: Keys::default(),
@@ -228,9 +233,10 @@ impl Config {
         }
         cfg.mouse = raw.mouse.unwrap_or(true);
         cfg.volume = raw.volume.unwrap_or(0.6).clamp(0.0, 1.0);
-        cfg.sound_done = raw.sound_done.map(|p| crate::app::expand_tilde(&p));
-        cfg.sound_waiting = raw.sound_waiting.map(|p| crate::app::expand_tilde(&p));
+        cfg.sound_done = raw.sound_done.map(|p| crate::paths::expand_tilde(&p));
+        cfg.sound_waiting = raw.sound_waiting.map(|p| crate::paths::expand_tilde(&p));
         cfg.sidebar_width = raw.sidebar_width.unwrap_or(0);
+        cfg.scrollback = raw.scrollback.unwrap_or(DEFAULT_SCROLLBACK).clamp(100, 100_000);
         if let Some(t) = raw.theme {
             if let Some(n) = t.name {
                 cfg.theme_name = n;
@@ -267,11 +273,7 @@ impl Config {
             };
             let def = AgentDef {
                 id: slug(&a.name),
-                color: a
-                    .color
-                    .as_deref()
-                    .and_then(parse_color)
-                    .unwrap_or(Color::Rgb(148, 163, 184)),
+                color: a.color.as_deref().and_then(parse_color).unwrap_or(Color::Rgb(148, 163, 184)),
                 approve: match a.approve.as_deref() {
                     Some(s) => parse_approve(s),
                     None => default_approve(&a.command),
@@ -357,9 +359,7 @@ impl Config {
 
     pub fn find(&self, id: &str) -> Option<&AgentDef> {
         let id = id.to_lowercase();
-        self.agents
-            .iter()
-            .find(|a| a.id == id || a.command == id || a.name.to_lowercase() == id)
+        self.agents.iter().find(|a| a.id == id || a.command == id || a.name.to_lowercase() == id)
     }
 }
 
@@ -384,6 +384,9 @@ mouse = true
 
 # Ширина списка агентов в колонках (0 — автоматически)
 sidebar_width = 0
+
+# Глубина прокрутки назад (строк на агента). Память ≈ строки × ширина окна × ~30 байт: 5000 строк при 100 колонках ≈ 15 МБ
+scrollback = 5000
 
 # Цветовая схема (меняется и в интерфейсе: Ctrl+b, затем «,» — Настройки).
 # radar, terminal (палитра вашего терминала), catppuccin, catppuccin-latte, tokyo-night, tokyo-night-day,
@@ -457,13 +460,18 @@ mod tests {
 
     #[test]
     fn keys_from_config() {
-        let raw: RawConfig = toml::from_str(
-            "[keys]\nprefix = \"ctrl+a\"\n[keys.direct]\n\"alt+n\" = \"new\"\n\"x+y\" = \"zzz\"",
-        )
-        .unwrap();
+        let raw: RawConfig =
+            toml::from_str("[keys]\nprefix = \"ctrl+a\"\n[keys.direct]\n\"alt+n\" = \"new\"\n\"x+y\" = \"zzz\"")
+                .unwrap();
         let k = raw.keys.unwrap();
         assert_eq!(k.prefix.as_deref(), Some("ctrl+a"));
         assert_eq!(k.direct.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn example_scrollback_is_default() {
+        let raw: RawConfig = toml::from_str(EXAMPLE).unwrap();
+        assert_eq!(raw.scrollback, Some(DEFAULT_SCROLLBACK));
     }
 
     #[test]

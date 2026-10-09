@@ -4,10 +4,10 @@
 //! чтобы не тормозить интерфейс. Не-git папки просто не показывают git-информацию.
 
 use crate::session::Msg;
+use crate::sync::MutexExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -47,52 +47,31 @@ impl Info {
     }
 }
 
-/// Запускает git с таймаутом; возвращает stdout при успехе.
-pub fn run(dir: &Path, args: &[&str]) -> Option<String> {
-    run_timeout(dir, args, Duration::from_secs(3))
+/// Результат запуска git.
+struct Captured {
+    ok: bool,
+    stdout: String,
+    stderr: String,
 }
 
-pub fn run_timeout(dir: &Path, args: &[&str], limit: Duration) -> Option<String> {
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    // stdout читаем в отдельном потоке: большой вывод (diff) иначе заполнит канал и git зависнет
-    let mut stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
+/// Читает поток до конца в отдельном потоке: большой вывод (diff) иначе заполнит канал, и git зависнет.
+fn drain(mut pipe: impl std::io::Read + Send + 'static) -> Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        use std::io::Read;
         let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
+        let _ = pipe.read_to_end(&mut buf);
         let _ = tx.send(buf);
     });
-    match rx.recv_timeout(limit) {
-        Ok(buf) => {
-            let ok = child.wait().map(|s| s.success()).unwrap_or(false);
-            ok.then(|| String::from_utf8_lossy(&buf).into_owned())
-        }
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            None
-        }
-    }
+    rx
 }
 
-/// Выполняет git для действий пользователя (commit, push, merge…): возвращает вывод или текст ошибки.
-/// Никогда не ждёт ввода: запрос пароля отключён, ssh — в пакетном режиме.
-pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+/// Запускает git и ждёт не дольше `limit`. Никогда не ждёт ввода: запрос пароля отключён, ssh — в пакетном режиме.
+fn capture(dir: &Path, args: &[&str], limit: Duration) -> Result<Captured, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(dir)
         .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -101,43 +80,48 @@ pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String
         cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
     }
     let mut child = cmd.spawn().map_err(|_| "git не найден".to_string())?;
-    let mut out = child.stdout.take().ok_or("нет stdout")?;
-    let mut err = child.stderr.take().ok_or("нет stderr")?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let tx2 = tx.clone();
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut b = Vec::new();
-        let _ = out.read_to_end(&mut b);
-        let _ = tx.send((true, b));
-    });
-    std::thread::spawn(move || {
-        use std::io::Read;
-        let mut b = Vec::new();
-        let _ = err.read_to_end(&mut b);
-        let _ = tx2.send((false, b));
-    });
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let start = Instant::now();
-    for _ in 0..2 {
-        let left = limit.saturating_sub(start.elapsed());
-        match rx.recv_timeout(left) {
-            Ok((true, b)) => so = b,
-            Ok((false, b)) => se = b,
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("git не ответил за {} с", limit.as_secs()));
-            }
-        }
-    }
-    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
-    let so = String::from_utf8_lossy(&so).trim().to_string();
-    let se = String::from_utf8_lossy(&se).trim().to_string();
-    if ok {
-        Ok(if so.is_empty() { se } else { so })
+    let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("не удалось прочитать вывод git".into());
+    };
+    let (out, err) = (drain(out), drain(err));
+    let deadline = Instant::now() + limit;
+    let wait = |rx: &Receiver<Vec<u8>>| rx.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+    let (Ok(stdout), Ok(stderr)) = (wait(&out), wait(&err)) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("git не ответил за {} с", limit.as_secs()));
+    };
+    let ok = child.wait().is_ok_and(|s| s.success());
+    Ok(Captured {
+        ok,
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    })
+}
+
+/// Запускает git с таймаутом 3 с; возвращает stdout при успехе.
+pub fn run(dir: &Path, args: &[&str]) -> Option<String> {
+    run_timeout(dir, args, Duration::from_secs(3))
+}
+
+pub fn run_timeout(dir: &Path, args: &[&str], limit: Duration) -> Option<String> {
+    capture(dir, args, limit).ok().filter(|c| c.ok).map(|c| c.stdout)
+}
+
+/// Выполняет git для действий пользователя (commit, push, merge…): возвращает вывод или текст ошибки.
+pub fn exec(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    let c = capture(dir, args, limit)?;
+    let (so, se) = (c.stdout.trim(), c.stderr.trim());
+    if c.ok {
+        Ok(if so.is_empty() { se } else { so }.to_string())
     } else {
-        Err(if !se.is_empty() { se } else if !so.is_empty() { so } else { "git завершился с ошибкой".into() })
+        Err(match (se.is_empty(), so.is_empty()) {
+            (false, _) => se.to_string(),
+            (true, false) => so.to_string(),
+            (true, true) => "git завершился с ошибкой".to_string(),
+        })
     }
 }
 
@@ -218,66 +202,66 @@ pub fn query(dir: &Path) -> Option<Info> {
     Some(info)
 }
 
-/// Фоновый опрос git для списка агентов.
-#[derive(Clone)]
+/// Плановое обновление git-состояния, даже если никто не просил.
+const REFRESH: Duration = Duration::from_secs(4);
+/// Не чаще одного опроса за это время: серия сигналов схлопывается в один опрос.
+const MIN_GAP: Duration = Duration::from_millis(300);
+
+/// Фоновый опрос git для списка агентов. Поток ждёт на канале и просыпается по сигналу
+/// (`poke`, смена списка) или раз в `REFRESH`; когда `Watcher` уничтожен, поток завершается.
 pub struct Watcher {
     targets: Arc<Mutex<Vec<(u32, PathBuf)>>>,
-    poke: Arc<AtomicBool>,
+    wake: Sender<()>,
 }
 
 impl Watcher {
     pub fn start(tx: Sender<Msg>) -> Watcher {
-        let w = Watcher {
-            targets: Arc::new(Mutex::new(vec![])),
-            poke: Arc::new(AtomicBool::new(true)),
-        };
-        let t = w.clone();
-        std::thread::spawn(move || {
-            let mut last = Instant::now() - Duration::from_secs(60);
-            loop {
-                std::thread::sleep(Duration::from_millis(300));
-                let due = t.poke.swap(false, Ordering::Relaxed) || last.elapsed() >= Duration::from_secs(4);
-                if !due {
-                    continue;
-                }
-                last = Instant::now();
-                let targets = t.targets.lock().unwrap().clone();
-                let mut seen: Vec<(PathBuf, Option<Info>)> = vec![];
-                for (id, dir) in targets {
-                    let info = match seen.iter().find(|(d, _)| *d == dir) {
-                        Some((_, i)) => i.clone(),
-                        None => {
-                            let i = query(&dir);
-                            seen.push((dir.clone(), i.clone()));
-                            i
-                        }
-                    };
-                    if tx.send(Msg::Git(id, info)).is_err() {
-                        return; // интерфейс закрыт
+        let targets = Arc::new(Mutex::new(Vec::new()));
+        let (wake, signals) = mpsc::channel::<()>();
+        let shared = Arc::clone(&targets);
+        std::thread::spawn(move || loop {
+            let list: Vec<(u32, PathBuf)> = shared.lock_or_recover().clone();
+            let mut seen: Vec<(PathBuf, Option<Info>)> = vec![];
+            for (id, dir) in list {
+                let info = match seen.iter().find(|(d, _)| *d == dir) {
+                    Some((_, i)) => i.clone(),
+                    None => {
+                        let i = query(&dir);
+                        seen.push((dir, i.clone()));
+                        i
                     }
+                };
+                if tx.send(Msg::Git(id, info)).is_err() {
+                    return; // интерфейс закрыт
                 }
             }
+            std::thread::sleep(MIN_GAP);
+            match signals.recv_timeout(REFRESH) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => while signals.try_recv().is_ok() {},
+                Err(RecvTimeoutError::Disconnected) => return, // Watcher уничтожен
+            }
         });
-        w
+        Watcher { targets, wake }
     }
 
     pub fn set_targets(&self, list: Vec<(u32, PathBuf)>) {
-        let mut t = self.targets.lock().unwrap();
+        let mut t = self.targets.lock_or_recover();
         if *t != list {
             *t = list;
-            self.poke.store(true, Ordering::Relaxed);
+            self.poke();
         }
     }
 
     /// Обновить немедленно (например, агент закончил работу).
     pub fn poke(&self) {
-        self.poke.store(true, Ordering::Relaxed);
+        let _ = self.wake.send(());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{git, repo, TempDir};
 
     #[test]
     fn parses_status() {
@@ -294,27 +278,9 @@ mod tests {
         assert_eq!(parse_numstat("3\t1\ta.rs\n-\t-\timg.png\n10\t0\tb.rs\n"), (13, 1));
     }
 
-    fn git(dir: &Path, args: &[&str]) {
-        let ok = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-            .args(args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "git {args:?}");
-    }
-
     #[test]
     fn real_repository() {
-        let d = std::env::temp_dir().join(format!("radar-git-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        assert!(query(&d).is_none() || d.join(".git").exists() || true);
-        git(&d, &["init"]);
+        let d = repo("git");
         std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
         git(&d, &["add", "."]);
         git(&d, &["commit", "-m", "first"]);
@@ -328,15 +294,34 @@ mod tests {
         assert_eq!(dirty.files, 2);
         assert!(dirty.added >= 2 && dirty.removed >= 1, "{dirty:?}");
         assert!(dirty.dirty());
-        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn watcher_reports_and_stops() {
+        let d = repo("watch");
+        let (tx, rx) = mpsc::channel();
+        let w = Watcher::start(tx);
+        w.set_targets(vec![(7, d.to_path_buf())]);
+        let Msg::Git(id, info) = rx.recv_timeout(Duration::from_secs(5)).expect("сообщение о git") else {
+            panic!("ожидалось Msg::Git");
+        };
+        assert_eq!(id, 7);
+        assert_eq!(info.expect("репозиторий").branch, "main");
+        // после уничтожения Watcher поток завершается и отпускает Sender
+        drop(w);
+        loop {
+            match rx.recv_timeout(Duration::from_secs(3)) {
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => panic!("поток опроса не завершился"),
+            }
+        }
     }
 
     #[test]
     fn not_a_repository() {
-        let d = std::env::temp_dir().join(format!("radar-nogit-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
+        let d = TempDir::new("nogit");
         // /tmp может лежать внутри репозитория — поэтому проверяем только отсутствие паники
         let _ = query(&d);
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

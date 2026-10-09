@@ -2,11 +2,13 @@
 
 use crate::config::{AgentDef, Kind};
 use crate::status::{self, Signals, Status};
-use anyhow::Result;
+use crate::sync::MutexExt;
+use anyhow::{Context, Result};
 use ratatui::style::Color;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -44,6 +46,19 @@ pub enum Attention {
 pub struct SpawnCtx {
     pub sock: PathBuf,
     pub claude_settings: Option<PathBuf>,
+}
+
+/// Сколько строк истории прокрутки хранит окно на каждого агента.
+/// Память: около 15 МБ на агента при ширине 100 колонок (и ~29 МБ при 200) на полностью заполненной истории.
+static SCROLLBACK_LINES: AtomicUsize = AtomicUsize::new(crate::config::DEFAULT_SCROLLBACK);
+
+/// Задаёт глубину прокрутки для новых экранов агентов (из `scrollback` в config.toml).
+pub fn set_scrollback(lines: usize) {
+    SCROLLBACK_LINES.store(lines, Ordering::Relaxed);
+}
+
+fn scrollback_lines() -> usize {
+    SCROLLBACK_LINES.load(Ordering::Relaxed)
 }
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
@@ -93,7 +108,7 @@ struct FrameWriter(Arc<Mutex<UnixStream>>);
 
 impl Write for FrameWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut c = self.0.lock().unwrap();
+        let mut c = self.0.lock_or_recover();
         crate::host::write_frame(&mut *c, b'I', buf)?;
         Ok(buf.len())
     }
@@ -111,50 +126,52 @@ pub fn default_shell() -> String {
             return s;
         }
     }
-    ["/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"]
-        .into_iter()
-        .find(|p| ok(p))
-        .unwrap_or("/bin/sh")
-        .to_string()
+    ["/bin/zsh", "/bin/bash", "/usr/bin/bash", "/bin/sh"].into_iter().find(|p| ok(p)).unwrap_or("/bin/sh").to_string()
 }
 
 pub fn shq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// Ищет команду так, как её найдёт запускаемый агент: через login+interactive shell
-/// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полный путь.
-pub fn find_binary(bin: &str) -> Option<String> {
-    if bin == "$SHELL" {
-        return Some(default_shell());
+/// Ищет команды так, как их найдёт запускаемый агент: через login+interactive shell
+/// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полные пути в порядке `bins`.
+/// Один шелл на все команды: каждый такой шелл читает rc-файлы пользователя, а они бывают тяжёлыми.
+pub fn find_binaries(bins: &[&str]) -> Vec<Option<String>> {
+    let names: Vec<&str> = bins.iter().copied().filter(|b| *b != "$SHELL").collect();
+    let mut paths: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if !names.is_empty() {
+        let list: Vec<String> = names.iter().map(|b| shq(b)).collect();
+        // «имя<TAB>путь» на каждую команду; пусто, если не найдена
+        let script =
+            format!("for b in {}; do printf '%s\\t%s\\n' \"$b\" \"$(command -v \"$b\")\"; done", list.join(" "));
+        use std::os::unix::process::CommandExt;
+        let mut cmd = std::process::Command::new(default_shell());
+        // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
+        // получает SIGTTOU («suspended (tty output)»). setsid отрезает его от управляющего терминала.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+        cmd.args(["-l", "-i", "-c", &script])
+            .env("SHELL_SESSIONS_DISABLE", "1")
+            .env_remove("TERM_SESSION_ID")
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(out) = cmd.output() {
+            // шелл может напечатать приветствие — берём только строки «имя<TAB>/путь»
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                if let Some((name, path)) = line.split_once('\t') {
+                    let path = path.trim();
+                    if path.starts_with('/') {
+                        paths.insert(name.to_string(), path.to_string());
+                    }
+                }
+            }
+        }
     }
-    let shell = default_shell();
-    use std::os::unix::process::CommandExt;
-    let mut cmd = std::process::Command::new(shell);
-    // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
-    // получает SIGTTOU («suspended (tty output)»). setsid отрезает его от управляющего терминала.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    cmd.args(["-l", "-i", "-c", &format!("command -v {}", shq(bin))])
-        .env("SHELL_SESSIONS_DISABLE", "1")
-        .env_remove("TERM_SESSION_ID")
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    cmd.output()
-        .ok()
-        .filter(|o| o.status.success())
-        // шелл может напечатать приветствие — путь всегда в последней строке
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(str::trim)
-                .rfind(|l| l.starts_with('/'))
-                .map(str::to_string)
-        })
+    bins.iter().map(|b| if *b == "$SHELL" { Some(default_shell()) } else { paths.get(*b).cloned() }).collect()
 }
 
 /// Отдаёт вывод агента эмулятору. Эмулятор не умеет `CSI 3 J` («очистить и историю прокрутки») — а именно её
@@ -168,7 +185,7 @@ pub fn feed(parser: &mut vt100::Parser, data: &[u8]) {
         parser.process(&rest[..end]);
         let (rows, cols) = parser.screen().size();
         let screen = parser.screen().state_formatted();
-        *parser = vt100::Parser::new(rows, cols, 5000);
+        *parser = vt100::Parser::new(rows, cols, scrollback_lines());
         parser.process(&screen);
         rest = &rest[end..];
     }
@@ -229,10 +246,16 @@ impl Session {
                 (sv("TERM_PROGRAM"), sv("radar")),
                 (sv("SHELL_SESSIONS_DISABLE"), sv("1")),
             ],
-            env_remove: ["CLAUDECODE", "TERM_PROGRAM_VERSION", "TERM_SESSION_ID", "ITERM_SESSION_ID", "WARP_SESSION_ID"]
-                .iter()
-                .map(|k| k.to_string())
-                .collect(),
+            env_remove: [
+                "CLAUDECODE",
+                "TERM_PROGRAM_VERSION",
+                "TERM_SESSION_ID",
+                "ITERM_SESSION_ID",
+                "WARP_SESSION_ID",
+            ]
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
             meta: crate::host::Meta {
                 id,
                 name,
@@ -247,17 +270,17 @@ impl Session {
         };
         crate::host::launch(&spec)?;
         match crate::host::attach(&sock)? {
-            Some((meta, stream)) => Ok(Session::from_host(def, meta, stream, tx)),
+            Some((meta, stream)) => Session::from_host(def, meta, stream, tx),
             None => Err(anyhow::anyhow!("агент уже подключён к другому окну")),
         }
     }
 
     /// Собирает сессию по метаданным и соединению с хозяином (новый агент или подключение к работающему).
-    pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Session {
+    pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Result<Session> {
         let id = meta.id;
         let (rows, cols) = (meta.rows, meta.cols);
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 5000)));
-        let conn = Arc::new(Mutex::new(stream.try_clone().expect("клонирование сокета")));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, scrollback_lines())));
+        let conn = Arc::new(Mutex::new(stream.try_clone().context("клонирование сокета")?));
         let writer: Writer = Arc::new(Mutex::new(Box::new(FrameWriter(conn.clone()))));
         {
             let parser = parser.clone();
@@ -266,7 +289,7 @@ impl Session {
                 loop {
                     match crate::host::read_frame(&mut stream) {
                         Ok(Some((b'O', data))) => {
-                            feed(&mut parser.lock().unwrap(), &data);
+                            feed(&mut parser.lock_or_recover(), &data);
                             if tx.send(Msg::Output(id)).is_err() {
                                 break;
                             }
@@ -295,7 +318,7 @@ impl Session {
             });
         }
         let now = Instant::now();
-        Session {
+        Ok(Session {
             id,
             name: meta.name.clone(),
             agent: def.name.clone(),
@@ -326,7 +349,7 @@ impl Session {
             writer,
             conn,
             meta_sent: (meta.name, meta.resume_id, meta.muted),
-        }
+        })
     }
 
     /// Сообщает хозяину об изменении имени, диалога Claude или признака «тишина».
@@ -364,23 +387,23 @@ impl Session {
     }
 
     pub fn app_cursor(&self) -> bool {
-        self.parser.lock().unwrap().screen().application_cursor()
+        self.parser.lock_or_recover().screen().application_cursor()
     }
 
     pub fn bracketed_paste(&self) -> bool {
-        self.parser.lock().unwrap().screen().bracketed_paste()
+        self.parser.lock_or_recover().screen().bracketed_paste()
     }
 
     /// Режимы мыши, которые включил сам агент, и находится ли он на альтернативном экране.
     pub fn mouse_state(&self) -> (vt100::MouseProtocolMode, vt100::MouseProtocolEncoding, bool) {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let sc = p.screen();
         (sc.mouse_protocol_mode(), sc.mouse_protocol_encoding(), sc.alternate_screen())
     }
 
     /// Сколько строк истории можно прокрутить.
     pub fn max_scrollback(&self) -> usize {
-        let mut p = self.parser.lock().unwrap();
+        let mut p = self.parser.lock_or_recover();
         p.screen_mut().set_scrollback(usize::MAX);
         let n = p.screen().scrollback();
         p.screen_mut().set_scrollback(0);
@@ -389,11 +412,8 @@ impl Session {
 
     /// Прокрутка истории (вверх — к старому), с ограничением реальной длиной истории.
     pub fn scroll_by(&mut self, up: bool, lines: usize) {
-        self.scroll = if up {
-            (self.scroll + lines).min(self.max_scrollback())
-        } else {
-            self.scroll.saturating_sub(lines)
-        };
+        self.scroll =
+            if up { (self.scroll + lines).min(self.max_scrollback()) } else { self.scroll.saturating_sub(lines) };
     }
 
     /// Сырые байты агенту (события мыши и т. п.), без побочных эффектов ввода.
@@ -465,7 +485,7 @@ impl Session {
             d.extend_from_slice(&cols.to_be_bytes());
             let _ = crate::host::write_frame(&mut *c, b'R', &d);
         }
-        self.parser.lock().unwrap().screen_mut().set_size(rows, cols);
+        self.parser.lock_or_recover().screen_mut().set_size(rows, cols);
     }
 
     /// Вызывается, когда агент что-то вывел.
@@ -495,7 +515,7 @@ impl Session {
 
     /// Вопрос агента и варианты ответа так, как они показаны на его экране (для диалога разрешения).
     pub fn prompt_excerpt(&self) -> Vec<String> {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let screen = p.screen();
         let (_, cols) = screen.size();
         let rows: Vec<String> = screen.rows(0, cols).collect();
@@ -504,7 +524,7 @@ impl Session {
 
     /// Последние `lines` непустых строк экрана (для `radar ctl read`).
     pub fn screen_text(&self, lines: usize) -> String {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let screen = p.screen();
         let (_, cols) = screen.size();
         let rows: Vec<String> = screen.rows(0, cols).map(|r| r.trim_end().to_string()).collect();
@@ -515,13 +535,10 @@ impl Session {
 
     /// Нижние строки экрана агента (для эвристики).
     fn tail_text(&self) -> String {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let screen = p.screen();
         let (_, cols) = screen.size();
-        let rows: Vec<String> = screen
-            .rows(0, cols)
-            .filter(|r| !r.trim().is_empty())
-            .collect();
+        let rows: Vec<String> = screen.rows(0, cols).filter(|r| !r.trim().is_empty()).collect();
         let start = rows.len().saturating_sub(16);
         rows[start..].join("\n")
     }
@@ -544,11 +561,7 @@ impl Session {
             return None;
         }
         let tail = self.tail_text();
-        let sig = Signals {
-            tail: &tail,
-            since_activity: self.last_activity.elapsed(),
-            submitted: self.submitted,
-        };
+        let sig = Signals { tail: &tail, since_activity: self.last_activity.elapsed(), submitted: self.submitted };
         let next = status::decide(self.status, &sig);
         self.set_status(next)
     }
@@ -660,14 +673,12 @@ fn is_frame_char(c: char) -> bool {
     c.is_whitespace() || ('\u{2500}'..='\u{257F}').contains(&c)
 }
 
-/// Из строк экрана выбирает вопрос с вариантами: вокруг последнего списка «1. …».
-/// Рамки и пустые строки отбрасываются; если списка нет — берутся последние строки.
 /// Номер варианта в начале строки («› 2. …» → 2) и отмечена ли строка маркером выбора.
 fn option_number(line: &str) -> Option<(usize, bool)> {
     const MARKS: &str = "›❯>●○→";
     let marked = line.trim_start().starts_with(|c| MARKS.contains(c));
     let t = line.trim_start_matches(|c: char| c.is_whitespace() || MARKS.contains(c));
-    let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String = t.chars().take_while(char::is_ascii_digit).collect();
     let rest = &t[digits.len()..];
     if digits.is_empty() || !(rest.starts_with('.') || rest.starts_with(')')) {
         return None;
@@ -693,18 +704,12 @@ pub fn option_lines(excerpt: &[String]) -> (Vec<usize>, Option<usize>) {
     (idx, hi)
 }
 
+/// Из строк экрана выбирает вопрос с вариантами: вокруг последнего списка «1. …».
+/// Рамки и пустые строки отбрасываются; если списка нет — берутся последние строки.
 pub fn excerpt(rows: &[String]) -> Vec<String> {
-    let lines: Vec<String> = rows
-        .iter()
-        .map(|r| r.trim_matches(is_frame_char).to_string())
-        .filter(|r| !r.is_empty())
-        .collect();
-    let first_option = |s: &String| {
-        let t = s.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
-        let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-        digits == "1" && t[1..].starts_with(|c| c == '.' || c == ')')
-    };
-    let (start, end) = match lines.iter().rposition(first_option) {
+    let lines: Vec<String> =
+        rows.iter().map(|r| r.trim_matches(is_frame_char).to_string()).filter(|r| !r.is_empty()).collect();
+    let (start, end) = match lines.iter().rposition(|l| option_number(l).is_some_and(|(n, _)| n == 1)) {
         Some(i) => {
             // вверх — до эха пользовательского запроса («> …») или ответа агента («● …»)
             let mut start = i;
@@ -720,6 +725,21 @@ pub fn excerpt(rows: &[String]) -> Vec<String> {
         None => (lines.len().saturating_sub(8), lines.len()),
     };
     lines[start..end].to_vec()
+}
+
+#[cfg(test)]
+mod find_tests {
+    use super::*;
+
+    #[test]
+    fn finds_all_commands_with_one_shell() {
+        let r = find_binaries(&["sh", "radar-no-such-binary-xyz", "$SHELL", "env"]);
+        assert!(r[0].as_deref().is_some_and(|p| p.starts_with('/')), "{r:?}");
+        assert!(r[1].is_none(), "{r:?}");
+        assert_eq!(r[2], Some(default_shell()));
+        assert!(r[3].as_deref().is_some_and(|p| p.ends_with("/env")), "{r:?}");
+        assert!(find_binaries(&[]).is_empty());
+    }
 }
 
 #[cfg(test)]
