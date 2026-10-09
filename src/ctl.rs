@@ -252,7 +252,7 @@ fn wait(sock: &PathBuf, t: &str, a: &Args) -> Result<i32> {
         } else {
             calm_since = None;
         }
-        if timeout.map_or(false, |t| start.elapsed().as_secs_f64() >= t) {
+        if timeout.is_some_and(|t| start.elapsed().as_secs_f64() >= t) {
             println!("{st}");
             return Ok(124);
         }

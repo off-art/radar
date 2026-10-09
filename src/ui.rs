@@ -36,7 +36,7 @@ fn icon(s: &Session, ms: u128) -> &'static str {
     match s.status {
         Status::Working => SPINNER[(ms / 80) as usize % SPINNER.len()],
         Status::Waiting => {
-            if (ms / 500) % 2 == 0 {
+            if (ms / 500).is_multiple_of(2) {
                 "●"
             } else {
                 "○"
@@ -242,9 +242,7 @@ fn draw_sidebar(f: &mut Frame, app: &App) {
         // строка 1: иконка, имя, время
         let time = status_time(s);
         let mut name_style = bg.add_modifier(Modifier::BOLD);
-        if !selected && s.unread {
-            name_style = name_style.fg(th.text);
-        } else if !selected {
+        if !selected {
             name_style = name_style.fg(th.text);
         }
         let unread = if s.unread { " ●" } else { "" };
@@ -1040,7 +1038,7 @@ fn approve_geom(app: &App, i: usize, note: &str, sel: Option<usize>, area: Rect)
     let th = &app.theme;
     let s = app.sessions.get(i)?;
     let excerpt = s.prompt_excerpt();
-    let w = area.width.saturating_sub(4).min(78).max(30);
+    let w = area.width.saturating_sub(4).clamp(30, 78);
     let text_w = w.saturating_sub(4) as usize;
     let mut lines: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
@@ -1116,7 +1114,7 @@ fn confirm_view(app: &App, c: &Confirm) -> ConfirmView {
     let session = |i: usize| app.sessions.get(i);
     let name = |i: usize| session(i).map(|s| format!("{} · {}", s.name, s.agent)).unwrap_or_default();
     let branch = |i: usize| session(i).and_then(|s| s.git.as_ref()).map(|g| g.branch.clone()).unwrap_or_default();
-    let dirty = |i: usize| session(i).and_then(|s| s.git.as_ref()).map_or(false, |g| g.dirty());
+    let dirty = |i: usize| session(i).and_then(|s| s.git.as_ref()).is_some_and(|g| g.dirty());
     let running = app.sessions.iter().filter(|s| s.is_running()).count();
     match c {
         Confirm::Close(i) => {

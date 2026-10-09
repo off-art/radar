@@ -1487,7 +1487,7 @@ impl App {
             items.push(MenuItem::new("Открыть", Action::Select(idx), ""));
             items.push(MenuItem::sep());
         }
-        if self.sel.map_or(false, |sl| sl.idx == idx) {
+        if self.sel.is_some_and(|sl| sl.idx == idx) {
             items.push(MenuItem::new("Копировать", Action::CopySel, ""));
             items.push(MenuItem::sep());
         }
@@ -2543,7 +2543,7 @@ impl App {
                     .geo
                     .panes
                     .iter()
-                    .find(|p| p.header.map_or(false, |h| in_rect(&h, x, y)))
+                    .find(|p| p.header.is_some_and(|h| in_rect(&h, x, y)))
                     .map(|p| p.idx)
                     .filter(|&i| self.sessions[i].status == Status::Waiting)
                 {
@@ -2708,7 +2708,7 @@ impl App {
     fn mouse_modal(&mut self, x: u16, y: u16) {
         let area = Rect::new(0, 0, self.term_size().0, self.term_size().1);
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-        let hit_in = |rs: &[Rect], n: usize| rs.get(n).map_or(false, |r| in_rect(r, x, y));
+        let hit_in = |rs: &[Rect], n: usize| rs.get(n).is_some_and(|r| in_rect(r, x, y));
         match std::mem::replace(&mut self.mode, Mode::Normal) {
             Mode::Confirm(c) => {
                 let hit = ui::confirm_hit(self, &c, area);

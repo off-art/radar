@@ -34,7 +34,7 @@ fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
 
 /// Linux: `wl-copy` (Wayland) или `xclip`/`xsel` (X11), если установлены; иначе остаётся OSC 52.
 fn linux_clipboard(text: &str) -> bool {
-    let has = |v: &str| std::env::var_os(v).map_or(false, |x| !x.is_empty());
+    let has = |v: &str| std::env::var_os(v).is_some_and(|x| !x.is_empty());
     if has("WAYLAND_DISPLAY") && pipe_to("wl-copy", &[], text) {
         return true;
     }

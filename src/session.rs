@@ -687,7 +687,7 @@ pub fn excerpt(rows: &[String]) -> Vec<String> {
     let first_option = |s: &String| {
         let t = s.trim_start_matches(|c: char| c.is_whitespace() || "›❯>●○→".contains(c));
         let digits: String = t.chars().take_while(|c| c.is_ascii_digit()).collect();
-        digits == "1" && t[1..].starts_with(|c| c == '.' || c == ')')
+        digits == "1" && t[1..].starts_with(['.', ')'])
     };
     let (start, end) = match lines.iter().rposition(first_option) {
         Some(i) => {

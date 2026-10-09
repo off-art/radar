@@ -90,7 +90,7 @@ pub fn new_sock_path(id: u32) -> PathBuf {
 pub fn live_sockets() -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(run_dir()) else { return vec![] };
     let mut all: Vec<PathBuf> =
-        rd.flatten().map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "sock")).collect();
+        rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "sock")).collect();
     all.sort();
     all.retain(|p| {
         let ok = UnixStream::connect(p).is_ok();

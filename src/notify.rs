@@ -308,7 +308,7 @@ pub fn status_line() -> String {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status()
-                .map_or(false, |s| s.success())
+                .is_ok_and(|s| s.success())
         };
         let n = if has("notify-send") {
             "notify-send ок"
