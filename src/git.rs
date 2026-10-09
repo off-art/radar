@@ -7,8 +7,7 @@ use crate::session::Msg;
 use crate::sync::MutexExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -203,57 +202,59 @@ pub fn query(dir: &Path) -> Option<Info> {
     Some(info)
 }
 
-/// Фоновый опрос git для списка агентов.
-#[derive(Clone)]
+/// Плановое обновление git-состояния, даже если никто не просил.
+const REFRESH: Duration = Duration::from_secs(4);
+/// Не чаще одного опроса за это время: серия сигналов схлопывается в один опрос.
+const MIN_GAP: Duration = Duration::from_millis(300);
+
+/// Фоновый опрос git для списка агентов. Поток ждёт на канале и просыпается по сигналу
+/// (`poke`, смена списка) или раз в `REFRESH`; когда `Watcher` уничтожен, поток завершается.
 pub struct Watcher {
     targets: Arc<Mutex<Vec<(u32, PathBuf)>>>,
-    poke: Arc<AtomicBool>,
+    wake: Sender<()>,
 }
 
 impl Watcher {
     pub fn start(tx: Sender<Msg>) -> Watcher {
-        let w = Watcher { targets: Arc::new(Mutex::new(vec![])), poke: Arc::new(AtomicBool::new(true)) };
-        let t = w.clone();
-        std::thread::spawn(move || {
-            let mut last = Instant::now() - Duration::from_secs(60);
-            loop {
-                std::thread::sleep(Duration::from_millis(300));
-                let due = t.poke.swap(false, Ordering::Relaxed) || last.elapsed() >= Duration::from_secs(4);
-                if !due {
-                    continue;
-                }
-                last = Instant::now();
-                let targets = t.targets.lock_or_recover().clone();
-                let mut seen: Vec<(PathBuf, Option<Info>)> = vec![];
-                for (id, dir) in targets {
-                    let info = match seen.iter().find(|(d, _)| *d == dir) {
-                        Some((_, i)) => i.clone(),
-                        None => {
-                            let i = query(&dir);
-                            seen.push((dir.clone(), i.clone()));
-                            i
-                        }
-                    };
-                    if tx.send(Msg::Git(id, info)).is_err() {
-                        return; // интерфейс закрыт
+        let targets = Arc::new(Mutex::new(Vec::new()));
+        let (wake, signals) = mpsc::channel::<()>();
+        let shared = Arc::clone(&targets);
+        std::thread::spawn(move || loop {
+            let list: Vec<(u32, PathBuf)> = shared.lock_or_recover().clone();
+            let mut seen: Vec<(PathBuf, Option<Info>)> = vec![];
+            for (id, dir) in list {
+                let info = match seen.iter().find(|(d, _)| *d == dir) {
+                    Some((_, i)) => i.clone(),
+                    None => {
+                        let i = query(&dir);
+                        seen.push((dir, i.clone()));
+                        i
                     }
+                };
+                if tx.send(Msg::Git(id, info)).is_err() {
+                    return; // интерфейс закрыт
                 }
             }
+            std::thread::sleep(MIN_GAP);
+            match signals.recv_timeout(REFRESH) {
+                Ok(()) | Err(RecvTimeoutError::Timeout) => while signals.try_recv().is_ok() {},
+                Err(RecvTimeoutError::Disconnected) => return, // Watcher уничтожен
+            }
         });
-        w
+        Watcher { targets, wake }
     }
 
     pub fn set_targets(&self, list: Vec<(u32, PathBuf)>) {
         let mut t = self.targets.lock_or_recover();
         if *t != list {
             *t = list;
-            self.poke.store(true, Ordering::Relaxed);
+            self.poke();
         }
     }
 
     /// Обновить немедленно (например, агент закончил работу).
     pub fn poke(&self) {
-        self.poke.store(true, Ordering::Relaxed);
+        let _ = self.wake.send(());
     }
 }
 
@@ -293,6 +294,28 @@ mod tests {
         assert_eq!(dirty.files, 2);
         assert!(dirty.added >= 2 && dirty.removed >= 1, "{dirty:?}");
         assert!(dirty.dirty());
+    }
+
+    #[test]
+    fn watcher_reports_and_stops() {
+        let d = repo("watch");
+        let (tx, rx) = mpsc::channel();
+        let w = Watcher::start(tx);
+        w.set_targets(vec![(7, d.to_path_buf())]);
+        let Msg::Git(id, info) = rx.recv_timeout(Duration::from_secs(5)).expect("сообщение о git") else {
+            panic!("ожидалось Msg::Git");
+        };
+        assert_eq!(id, 7);
+        assert_eq!(info.expect("репозиторий").branch, "main");
+        // после уничтожения Watcher поток завершается и отпускает Sender
+        drop(w);
+        loop {
+            match rx.recv_timeout(Duration::from_secs(3)) {
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => panic!("поток опроса не завершился"),
+            }
+        }
     }
 
     #[test]

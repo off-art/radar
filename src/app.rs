@@ -553,7 +553,7 @@ impl App {
     }
 
     /// Записывает список агентов, если он изменился (вызывается из главного цикла).
-    pub fn persist_sessions(&mut self) {
+    fn persist_sessions(&mut self) {
         if !self.cfg.restore {
             return;
         }
@@ -603,6 +603,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        self.persist_sessions(); // последнее состояние до остановки агентов
         for s in &mut self.sessions {
             if self.stop_on_quit {
                 s.kill();
@@ -1063,6 +1064,7 @@ impl App {
                 self.dirty = true;
             }
         }
+        self.persist_sessions();
     }
 
     pub fn needs_animation(&self) -> bool {
@@ -2816,9 +2818,13 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
 
     let result = (|| -> Result<()> {
         let mut last_tick = Instant::now();
+        let mut last_input = Instant::now();
         let mut last_draw = Instant::now() - Duration::from_secs(1);
         loop {
-            if event::poll(Duration::from_millis(16))? {
+            // Занят — быстрый опрос; в простое реже: меньше пробуждений процессора.
+            let busy = app.dirty || app.needs_animation() || last_input.elapsed() < Duration::from_millis(500);
+            if event::poll(Duration::from_millis(if busy { 16 } else { 50 }))? {
+                last_input = Instant::now();
                 loop {
                     app.on_event(event::read()?);
                     if !event::poll(Duration::ZERO)? {
@@ -2836,7 +2842,6 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
             if app.quit {
                 break;
             }
-            app.persist_sessions();
             let since = last_draw.elapsed();
             let due = (app.dirty && since >= Duration::from_millis(16))
                 || (app.needs_animation() && since >= Duration::from_millis(100))
