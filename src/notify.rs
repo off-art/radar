@@ -231,7 +231,8 @@ pub fn build_helper() -> Result<(), String> {
     let plist = app.join("Contents").join("Info.plist");
     let pb = "/usr/libexec/PlistBuddy";
     let _ = quiet(Command::new(pb).args(["-c", "Delete :CFBundleIconName", &plist.to_string_lossy()]));
-    plist_set(&plist, "CFBundleIdentifier", "string", "dev.radar.notifier");
+    // Идентификатор сменён с dev.radar.notifier: macOS закэшировала за ним пустую иконку и не обновляла её.
+    plist_set(&plist, "CFBundleIdentifier", "string", "dev.radar.notifier2");
     plist_set(&plist, "CFBundleName", "string", "Radar");
     plist_set(&plist, "CFBundleDisplayName", "string", "Radar");
     plist_set(&plist, "CFBundleIconFile", "string", "applet");
