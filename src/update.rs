@@ -149,14 +149,12 @@ mod tests {
 
     #[test]
     fn replace_swaps_file_and_cleans_up() {
-        let dir = std::env::temp_dir().join(format!("radar-upd-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::testutil::TempDir::new("upd");
         let (exe, new) = (dir.join("radar"), dir.join("new"));
         std::fs::write(&exe, "old").unwrap();
         std::fs::write(&new, "new").unwrap();
         replace(&exe, &new).unwrap();
         assert_eq!(std::fs::read_to_string(&exe).unwrap(), "new");
         assert!(!exe.with_extension("old").exists());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

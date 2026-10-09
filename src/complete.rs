@@ -88,16 +88,10 @@ pub fn complete(input: &str) -> Completion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::TempDir;
 
-    fn tmp() -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let d = std::env::temp_dir().join(format!(
-            "radar-complete-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_dir_all(&d);
+    fn tmp() -> TempDir {
+        let d = TempDir::new("complete");
         for n in ["alpha", "alpine", "beta", ".hidden"] {
             std::fs::create_dir_all(d.join(n)).unwrap();
         }

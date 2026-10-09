@@ -1,8 +1,8 @@
 //! Отрисовка интерфейса.
 
-use crate::paths::short_path;
 use crate::app::{App, Confirm, Mode, NewForm, Palette, PaneRect};
 use crate::menu::Menu;
+use crate::paths::short_path;
 use crate::session::Session;
 use crate::status::Status;
 use crate::textfield::TextField;
@@ -616,11 +616,7 @@ fn field_spans(t: &TextField, active: bool) -> Vec<Span<'static>> {
         return vec![Span::raw(t.text())];
     }
     let cur = Style::default().add_modifier(Modifier::REVERSED);
-    vec![
-        Span::raw(before),
-        Span::styled(at.map_or_else(|| " ".into(), |c| c.to_string()), cur),
-        Span::raw(after),
-    ]
+    vec![Span::raw(before), Span::styled(at.map_or_else(|| " ".into(), |c| c.to_string()), cur), Span::raw(after)]
 }
 
 /// Расположение элементов формы «Новый агент» — общее для отрисовки и обработки кликов мыши.

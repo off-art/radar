@@ -19,6 +19,8 @@ mod paths;
 mod persist;
 mod session;
 mod status;
+#[cfg(test)]
+mod testutil;
 mod textfield;
 mod theme;
 mod ui;

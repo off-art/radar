@@ -345,9 +345,9 @@ impl App {
         } else {
             (dir, None)
         };
-        let base = name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
-            cwd.file_name().map_or_else(|| def.name.clone(), |s| s.to_string_lossy().to_string())
-        });
+        let base = name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| cwd.file_name().map_or_else(|| def.name.clone(), |s| s.to_string_lossy().to_string()));
         // одинаковые имена (несколько агентов в одной папке) различаем номером
         let mut name = base.clone();
         let mut n = 2;
@@ -2128,8 +2128,7 @@ impl App {
         if s.status != Status::Waiting {
             return Err("Агент ничего не просит: он не в статусе «ждёт ответа»".into());
         }
-        let enabled =
-            self.cfg.agents.iter().find(|d| d.name == s.agent).is_some_and(|d| !d.approve.is_empty());
+        let enabled = self.cfg.agents.iter().find(|d| d.name == s.agent).is_some_and(|d| !d.approve.is_empty());
         if !enabled {
             return Err(format!("Для «{}» подтверждение из списка не включено (approve в config.toml)", s.agent));
         }
@@ -2206,8 +2205,7 @@ impl App {
 
     fn key_confirm(&mut self, c: Confirm, k: KeyEvent) {
         if let Confirm::Approve(i, note, sel) = c {
-            let n =
-                self.sessions.get(i).map_or(0, |s| crate::session::option_lines(&s.prompt_excerpt()).0.len());
+            let n = self.sessions.get(i).map_or(0, |s| crate::session::option_lines(&s.prompt_excerpt()).0.len());
             let keep =
                 |app: &mut Self, sel: Option<usize>| app.mode = Mode::Confirm(Confirm::Approve(i, note.clone(), sel));
             match k.code {

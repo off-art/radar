@@ -153,9 +153,7 @@ fn app_ready() -> bool {
 fn plist_set(plist: &Path, key: &str, kind: &str, value: &str) {
     let pb = "/usr/libexec/PlistBuddy";
     let target = plist.to_string_lossy().to_string();
-    if quiet(Command::new(pb).args(["-c", &format!("Set :{key} {value}"), &target]))
-        .map_or(true, |s| !s.success())
-    {
+    if quiet(Command::new(pb).args(["-c", &format!("Set :{key} {value}"), &target])).map_or(true, |s| !s.success()) {
         let _ = quiet(Command::new(pb).args(["-c", &format!("Add :{key} {kind} {value}"), &target]));
     }
 }

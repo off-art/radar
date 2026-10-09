@@ -263,23 +263,8 @@ index 4..0
 
     #[test]
     fn loads_real_repository() {
-        use std::process::{Command, Stdio};
-        let d = std::env::temp_dir().join(format!("radar-diff-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        let g = |args: &[&str]| {
-            assert!(Command::new("git")
-                .arg("-C")
-                .arg(&d)
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-                .args(args)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-                .success());
-        };
-        g(&["init"]);
+        let d = crate::testutil::repo("diff");
+        let g = |args: &[&str]| crate::testutil::git(&d, args);
         std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
         g(&["add", "."]);
         g(&["commit", "-m", "first"]);
@@ -289,6 +274,5 @@ index 4..0
         assert_eq!(files.len(), 2);
         assert_eq!((files[0].path.as_str(), files[0].status, files[0].added, files[0].removed), ("a.txt", 'M', 2, 1));
         assert_eq!((files[1].path.as_str(), files[1].status, files[1].added), ("b.txt", '?', 1));
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

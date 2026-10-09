@@ -75,9 +75,7 @@ pub fn target_path(id: &str, home: &Path) -> Option<PathBuf> {
         // GigaCode — форк Qwen Code; в документации путь не указан, по умолчанию ~/.gigacode
         "gigacode" => home.join(".gigacode/settings.json"),
         "gemini" => home.join(".gemini/settings.json"),
-        "codex" => {
-            std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from).join("hooks.json")
-        }
+        "codex" => std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from).join("hooks.json"),
         "opencode" => home.join(".config/opencode/plugins/radar.js"),
         _ => return None,
     })
@@ -296,12 +294,10 @@ export const RadarPlugin = async () => {{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::TempDir;
 
-    fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("radar-int-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn tmp(name: &str) -> TempDir {
+        TempDir::new(&format!("int-{name}"))
     }
 
     #[test]

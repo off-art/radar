@@ -259,6 +259,7 @@ impl Watcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{git, repo, TempDir};
 
     #[test]
     fn parses_status() {
@@ -275,27 +276,9 @@ mod tests {
         assert_eq!(parse_numstat("3\t1\ta.rs\n-\t-\timg.png\n10\t0\tb.rs\n"), (13, 1));
     }
 
-    fn git(dir: &Path, args: &[&str]) {
-        let ok = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "init.defaultBranch=main"])
-            .args(args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "git {args:?}");
-    }
-
     #[test]
     fn real_repository() {
-        let d = std::env::temp_dir().join(format!("radar-git-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        assert!(query(&d).is_none() || d.join(".git").exists() || true);
-        git(&d, &["init"]);
+        let d = repo("git");
         std::fs::write(d.join("a.txt"), "one\ntwo\n").unwrap();
         git(&d, &["add", "."]);
         git(&d, &["commit", "-m", "first"]);
@@ -309,15 +292,12 @@ mod tests {
         assert_eq!(dirty.files, 2);
         assert!(dirty.added >= 2 && dirty.removed >= 1, "{dirty:?}");
         assert!(dirty.dirty());
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn not_a_repository() {
-        let d = std::env::temp_dir().join(format!("radar-nogit-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
+        let d = TempDir::new("nogit");
         // /tmp может лежать внутри репозитория — поэтому проверяем только отсутствие паники
         let _ = query(&d);
-        let _ = std::fs::remove_dir_all(&d);
     }
 }
