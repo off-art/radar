@@ -623,7 +623,7 @@
     return left + right;
   }
   function render() {
-    $('side').innerHTML = '<div class="hd"><b>Radar</b><span>' + L('3 в списке', '3 agents') + '</span></div>' + order.map(row).join('');
+    $('side').innerHTML = '<div class="hd"><b>radar<span style="color:#f59e0b">_</span></b><span>' + L('3 в списке', '3 agents') + '</span></div>' + order.map(row).join('');
     $('main').innerHTML = mainHtml();
     $('overlay').innerHTML = overlayHtml();
     $('tstatus').innerHTML = statusHtml();
