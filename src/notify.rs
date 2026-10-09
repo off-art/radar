@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const ICON: &[u8] = include_bytes!("../assets/icon.icns");
+/// Исходник иконки 1024×1024: на macOS из него штатные `sips` и `iconutil` собирают .icns
+/// (свой ICNS macOS иногда не принимает и рисует пустую иконку).
+const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 macro_rules! theme {
     ($n:literal) => {
@@ -142,7 +145,7 @@ pub fn play(kind: Sound, s: &Settings) {
 // ───────────── помощник Radar.app ─────────────
 
 fn stamp() -> String {
-    format!("{}-{}", env!("CARGO_PKG_VERSION"), ICON.len())
+    format!("{}-{}-{}", env!("CARGO_PKG_VERSION"), ICON.len(), ICON_PNG.len())
 }
 
 fn app_ready() -> bool {
@@ -156,6 +159,46 @@ fn plist_set(plist: &Path, key: &str, kind: &str, value: &str) {
     if quiet(Command::new(pb).args(["-c", &format!("Set :{key} {value}"), &target])).map_or(true, |s| !s.success()) {
         let _ = quiet(Command::new(pb).args(["-c", &format!("Add :{key} {kind} {value}"), &target]));
     }
+}
+
+/// Собирает .icns системными средствами macOS из PNG. `false` — не вышло (тогда берём встроенный файл).
+fn icns_from_png(dst: &Path) -> bool {
+    let dir = config_dir().join("icon.iconset");
+    let _ = std::fs::remove_dir_all(&dir);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return false;
+    }
+    let src = dir.join("src.png");
+    let ok = (|| {
+        std::fs::write(&src, ICON_PNG).ok()?;
+        // (имя файла в наборе, сторона в пикселях)
+        let sizes: [(&str, u32); 10] = [
+            ("icon_16x16", 16),
+            ("icon_16x16@2x", 32),
+            ("icon_32x32", 32),
+            ("icon_32x32@2x", 64),
+            ("icon_128x128", 128),
+            ("icon_128x128@2x", 256),
+            ("icon_256x256", 256),
+            ("icon_256x256@2x", 512),
+            ("icon_512x512", 512),
+            ("icon_512x512@2x", 1024),
+        ];
+        for (name, px) in sizes {
+            let out = dir.join(format!("{name}.png"));
+            let st = quiet(
+                Command::new("sips").args(["-z", &px.to_string(), &px.to_string()]).arg(&src).arg("--out").arg(&out),
+            )
+            .ok()?;
+            st.success().then_some(())?;
+        }
+        std::fs::remove_file(&src).ok()?;
+        let st = quiet(Command::new("iconutil").args(["-c", "icns", "-o"]).arg(dst).arg(&dir)).ok()?;
+        st.success().then_some(())
+    })()
+    .is_some();
+    let _ = std::fs::remove_dir_all(&dir);
+    ok && std::fs::metadata(dst).is_ok_and(|m| m.len() > 1000)
 }
 
 /// Создаёт (или обновляет) Radar.app. Возвращает ошибку с пояснением.
@@ -180,7 +223,10 @@ pub fn build_helper() -> Result<(), String> {
     }
     let res = app.join("Contents").join("Resources");
     std::fs::create_dir_all(&res).map_err(|e| e.to_string())?;
-    std::fs::write(res.join("applet.icns"), ICON).map_err(|e| e.to_string())?;
+    let icns = res.join("applet.icns");
+    if !icns_from_png(&icns) {
+        std::fs::write(&icns, ICON).map_err(|e| e.to_string())?;
+    }
     let _ = std::fs::remove_file(res.join("Assets.car"));
     let plist = app.join("Contents").join("Info.plist");
     let pb = "/usr/libexec/PlistBuddy";
