@@ -2802,6 +2802,21 @@ fn in_rect(r: &Rect, x: u16, y: u16) -> bool {
     r.width > 0 && x >= r.x && x < r.right() && y >= r.y && y < r.bottom()
 }
 
+/// Выключает режимы терминала, которые Radar включает сам (мышь, вставка, фокус).
+fn disable_extra_modes() {
+    let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
+}
+
+/// `ratatui::init` при панике возвращает только raw-режим и основной экран. Мышь, bracketed paste и фокус
+/// включены нами — без этого хука после падения терминал засыпает пользователя escape-последовательностями.
+fn install_panic_hook() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        disable_extra_modes();
+        previous(info);
+    }));
+}
+
 /// Главный цикл.
 pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
     let mut terminal = ratatui::init();
@@ -2813,6 +2828,7 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
     if app.cfg.mouse {
         let _ = execute!(out, EnableMouseCapture);
     }
+    install_panic_hook();
 
     let result = (|| -> Result<()> {
         let mut last_tick = Instant::now();
@@ -2856,7 +2872,7 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
     })();
 
     app.shutdown();
-    let _ = execute!(out, DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
+    disable_extra_modes();
     ratatui::restore();
     let _ = std::fs::remove_file(sock);
     result
