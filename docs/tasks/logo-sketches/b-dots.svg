@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>B: точки-агенты по статусам</title>
+  <rect x="5" y="5" width="54" height="54" rx="14" stroke="#8b94a5" stroke-width="3"/>
+  <circle cx="22" cy="24" r="6.5" fill="#60a5fa"/>
+  <circle cx="42" cy="24" r="6.5" fill="#facc15"/>
+  <circle cx="32" cy="43" r="6.5" fill="#4ade80"/>
+</svg>

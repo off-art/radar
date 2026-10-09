@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar: много AI-агентов в одном терминале</title>
+<meta name="description" content="Radar запускает Claude Code, Codex, OpenCode, Qwen Code, GigaCode и Gemini CLI в одном окне терминала со статусами, git и уведомлениями.">
+<link rel="icon" type="image/svg+xml" href="brand/radar-favicon.svg">
+<link rel="apple-touch-icon" href="brand/favicon-180.png">
+<meta property="og:title" content="Radar: many AI agents in one terminal window">
+<meta property="og:description" content="Claude Code, Codex, OpenCode, Qwen Code, GigaCode and Gemini CLI in one window, with statuses, git and notifications.">
+<meta property="og:image" content="https://off-art.github.io/radar/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0e1116; --bg2: #151a22; --line: #252c38; --text: #e6e9ef; --muted: #8b94a5;
+    --accent: #f59e0b; --green: #4ade80; --yellow: #facc15; --blue: #60a5fa; --red: #f87171;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #fbfaf7; --bg2: #ffffff; --line: #e4e0d6; --text: #1b1e24; --muted: #647084;
+      --accent: #d97706; --green: #16a34a; --yellow: #ca8a04; --blue: #2563eb; --red: #dc2626;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfaf7; --bg2: #ffffff; --line: #e4e0d6; --text: #1b1e24; --muted: #647084;
+    --accent: #d97706; --green: #16a34a; --yellow: #ca8a04; --blue: #2563eb; --red: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); }
+  a { color: inherit; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; }
+  .brand { display: inline-flex; text-decoration: none; }
+  .brand img { display: block; }
+  .nav-r { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+  .nav-r a.link { color: var(--muted); text-decoration: none; padding: 6px 10px; }
+  .nav-r a.link:hover { color: var(--text); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { background: none; border: 0; color: var(--muted); padding: 5px 10px; font: 600 12px var(--mono); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #111; }
+
+  .hero { text-align: center; padding: 56px 0 36px; }
+  .hero h1 { font-size: clamp(32px, 6vw, 56px); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 16px; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p.lead { max-width: 620px; margin: 0 auto 28px; color: var(--muted); font-size: 18px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .btn { display: inline-block; padding: 11px 20px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--line); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #111; }
+  .btn:hover { filter: brightness(1.08); }
+
+  .install { margin: 28px auto 0; max-width: 800px; display: flex; align-items: center; gap: 10px; background: var(--bg2);
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 10px 16px; font: 13px var(--mono); text-align: left; }
+  .install code { flex: 1; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+  .install code::before { content: "$ "; color: var(--muted); }
+  .install button { background: var(--line); color: var(--text); border: 0; border-radius: 8px; padding: 7px 12px; font: 600 12px var(--sans); cursor: pointer; }
+  .install button:hover { background: var(--accent); color: #111; }
+
+  /* терминал-макет */
+  .term { margin: 44px auto 0; max-width: 940px; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+    background: #0b0e13; color: #dbe1ea; box-shadow: 0 30px 80px -30px rgba(0,0,0,.55); text-align: left; }
+  .term-bar { display: flex; gap: 7px; padding: 11px 14px; background: #131820; border-bottom: 1px solid #1f2733; }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: #2c3442; }
+  .term-bar i:nth-child(1) { background: #ff5f57; } .term-bar i:nth-child(2) { background: #febc2e; } .term-bar i:nth-child(3) { background: #28c840; }
+  .term-body { display: grid; grid-template-columns: 270px 1fr; font: 13px/1.55 var(--mono); min-height: 330px; }
+  .side { border-right: 1px solid #1f2733; padding: 12px 0; background: #0e1219; }
+  .side h4 { margin: 0 14px 8px; font: 600 11px var(--mono); color: #6b7688; letter-spacing: .08em; text-transform: uppercase; }
+  .row { padding: 6px 14px; border-left: 3px solid transparent; }
+  .row.sel { background: #19202b; border-left-color: #f59e0b; }
+  .row .l1 { display: flex; justify-content: space-between; gap: 8px; }
+  .row .l2 { color: #6b7688; font-size: 12px; }
+  .st { font-size: 12px; }
+  .st.work { color: #60a5fa; } .st.wait { color: #facc15; } .st.done { color: #4ade80; }
+  .st.work::before { content: "⠋ "; display: inline-block; animation: spin 1s steps(1) infinite; }
+  @keyframes spin { 0%{content:"⠋ "} 12%{content:"⠙ "} 25%{content:"⠹ "} 37%{content:"⠸ "} 50%{content:"⠼ "} 62%{content:"⠴ "} 75%{content:"⠦ "} 87%{content:"⠧ "} }
+  .main { padding: 14px 18px; }
+  .main .prompt { color: #4ade80; } .main .dim { color: #6b7688; } .main .add { color: #4ade80; } .main .del { color: #f87171; }
+  .line { opacity: 0; animation: show .01s forwards; white-space: pre-wrap; }
+  .l1a { animation-delay: .4s } .l2a { animation-delay: 1.2s } .l3a { animation-delay: 2.2s } .l4a { animation-delay: 3.2s } .l5a { animation-delay: 4.2s }
+  @keyframes show { to { opacity: 1; } }
+  .cursor { display: inline-block; width: 8px; height: 15px; background: #dbe1ea; vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .status-bar { display: flex; justify-content: space-between; padding: 6px 14px; background: #f59e0b; color: #111; font: 600 12px var(--mono); }
+  @media (max-width: 720px) { .term-body { grid-template-columns: 1fr; } .side { border-right: 0; border-bottom: 1px solid #1f2733; } }
+
+  section { padding: 56px 0 8px; }
+  section h2 { font-size: 28px; letter-spacing: -.02em; margin: 0 0 8px; }
+  section p.sub { color: var(--muted); margin: 0 0 28px; max-width: 640px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+  .card { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  .card .ic { font: 700 13px var(--mono); color: var(--accent); margin-bottom: 8px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  tr:last-child td { border-bottom: 0; }
+  kbd { font: 600 12.5px var(--mono); background: var(--bg); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; }
+  .agents { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .chip { font: 600 13px var(--mono); border: 1px solid var(--line); background: var(--bg2); padding: 6px 12px; border-radius: 999px; }
+
+  .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .docs a { display: block; text-decoration: none; background: var(--bg2); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .docs a:hover { border-color: var(--accent); }
+  .docs b { display: block; margin-bottom: 2px; }
+  .docs span { color: var(--muted); font-size: 14px; }
+
+  footer { margin-top: 64px; border-top: 1px solid var(--line); padding: 26px 0 44px; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; }
+  [data-l]:not(.on) { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .line { animation-duration: 0s; animation-delay: 0s !important; } .cursor, .st.work::before { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#top" aria-label="radar_">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/radar-wordmark-on-dark.svg">
+        <img src="brand/radar-wordmark-on-light.svg" alt="radar_" height="30">
+      </picture>
+    </a>
+    <div class="nav-r">
+      <a class="link" href="#features"><span data-l="ru">Возможности</span><span data-l="en">Features</span></a>
+      <a class="link" href="#docs"><span data-l="ru">Документация</span><span data-l="en">Docs</span></a>
+      <a class="link" href="https://github.com/off-art/radar">GitHub</a>
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" data-set="ru" aria-pressed="true">RU</button>
+        <button type="button" data-set="en" aria-pressed="false">EN</button>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <h1>
+      <span data-l="ru">Много AI-агентов.<br><em>Одно окно.</em></span>
+      <span data-l="en">Many AI agents.<br><em>One window.</em></span>
+    </h1>
+    <p class="lead">
+      <span data-l="ru">Radar показывает, кто из агентов работает, кто закончил и кому нужен ваш ответ. Один бинарник на Rust, прямо в терминале.</span>
+      <span data-l="en">Radar shows which agents are working, which are done and which need your answer. A single Rust binary, right in your terminal.</span>
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#install"><span data-l="ru">Установить</span><span data-l="en">Install</span></a>
+      <a class="btn" href="https://github.com/off-art/radar"><span data-l="ru">Код на GitHub</span><span data-l="en">View on GitHub</span></a>
+    </div>
+
+    <div class="install" id="install">
+      <code id="cmd">curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash</code>
+      <button type="button" id="copy"><span data-l="ru">Копировать</span><span data-l="en">Copy</span></button>
+    </div>
+
+    <!-- Макет интерфейса. Заменить на docs/demo.gif, когда он будет записан -->
+    <div class="term" aria-label="Radar UI preview">
+      <div class="term-bar"><i></i><i></i><i></i></div>
+      <div class="term-body">
+        <div class="side">
+          <h4>radar</h4>
+          <div class="row sel"><div class="l1"><span>Claude Code</span><span class="st work">1:24</span></div><div class="l2">⎇ feat/health ●2 +38 −4</div></div>
+          <div class="row"><div class="l1"><span>Codex</span><span class="st wait">ждёт</span></div><div class="l2">⎇ feat/login ●5 +112 −31</div></div>
+          <div class="row"><div class="l1"><span>Qwen Code</span><span class="st done">✓ 4:12</span></div><div class="l2">⎇ docs/readme ●1 +64 −9</div></div>
+        </div>
+        <div class="main">
+          <div class="line l1a"><span class="prompt">❯</span> Добавь эндпоинт /health и тест</div>
+          <div class="line l2a dim">● Read(src/server.ts)</div>
+          <div class="line l3a"><span class="add">+ app.get('/health', (_req, res) =&gt; res.json({ ok: true }));</span></div>
+          <div class="line l4a dim">● Bash(npm test)</div>
+          <div class="line l5a"><span class="add">✓ 12 passed</span> <span class="cursor"></span></div>
+        </div>
+      </div>
+      <div class="status-bar"><span>НАВИГАЦИЯ · NAV</span><span>Codex: Bash: rm -rf build — y</span></div>
+    </div>
+  </header>
+
+  <section id="features">
+    <h2><span data-l="ru">Что внутри</span><span data-l="en">What you get</span></h2>
+    <p class="sub"><span data-l="ru">Всё, чтобы вести несколько агентов сразу и не терять нить.</span><span data-l="en">Everything you need to drive several agents at once without losing the thread.</span></p>
+    <div class="grid">
+      <div class="card"><div class="ic">01 ●</div>
+        <h3><span data-l="ru">Статусы в реальном времени</span><span data-l="en">Real-time statuses</span></h3>
+        <p><span data-l="ru">Работает, ждёт ответа, готов. Для Claude Code и Qwen Code точно, через хуки; для остальных по эвристике.</span><span data-l="en">Working, waiting, ready. Exact for Claude Code and Qwen Code via hooks; heuristics for the rest.</span></p></div>
+      <div class="card"><div class="ic">02 ♪</div>
+        <h3><span data-l="ru">Уведомления</span><span data-l="en">Notifications</span></h3>
+        <p><span data-l="ru">Системное уведомление и мягкий звук, когда агент закончил или ждёт вас. macOS и Linux.</span><span data-l="en">A system notification and a soft chime when an agent finishes or needs you. macOS and Linux.</span></p></div>
+      <div class="card"><div class="ic">03 ⎇</div>
+        <h3>Git</h3>
+        <p><span data-l="ru">Ветка и +/− у каждого агента, просмотр diff, commit, push, merge и worktree без выхода из Radar.</span><span data-l="en">Branch and +/− per agent, a diff viewer, commit, push, merge and worktrees without leaving Radar.</span></p></div>
+      <div class="card"><div class="ic">04 ⏻</div>
+        <h3><span data-l="ru">Фоновые сессии</span><span data-l="en">Background sessions</span></h3>
+        <p><span data-l="ru">Закрыли окно, агенты работают дальше. Запустили <code>radar</code> и вернулись на тот же экран.</span><span data-l="en">Close the window and agents keep going. Run <code>radar</code> and you are back on the same screen.</span></p></div>
+      <div class="card"><div class="ic">05 y</div>
+        <h3><span data-l="ru">Разрешения из списка</span><span data-l="en">Approve from the list</span></h3>
+        <p><span data-l="ru">Ответ на запрос агента одной клавишей, всегда с текстом запроса. Режима «разрешить всё» нет.</span><span data-l="en">Answer an agent's request with one key, always showing the request text. There is no "approve all".</span></p></div>
+      <div class="card"><div class="ic">06 &gt;_</div>
+        <h3><span data-l="ru">Управление из скриптов</span><span data-l="en">Scriptable</span></h3>
+        <p><span data-l="ru"><code>radar ctl new / send / wait / read</code> поднимает агентов и ждёт результата из любого скрипта.</span><span data-l="en"><code>radar ctl new / send / wait / read</code> starts agents and waits for results from any script.</span></p></div>
+    </div>
+
+    <div style="margin-top:28px">
+      <p class="sub" style="margin-bottom:10px"><span data-l="ru">Поддерживаемые агенты</span><span data-l="en">Supported agents</span></p>
+      <div class="agents">
+        <span class="chip">Claude Code</span><span class="chip">Codex</span><span class="chip">OpenCode</span><span class="chip">Qwen Code</span><span class="chip">GigaCode</span><span class="chip">Gemini CLI</span><span class="chip">shell</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="keys">
+    <h2><span data-l="ru">Пять клавиш для старта</span><span data-l="en">Five keys to start</span></h2>
+    <p class="sub"><span data-l="ru">Нажмите <kbd>Ctrl+b</kbd>, и режим навигации включён до <kbd>Esc</kbd>.</span><span data-l="en">Press <kbd>Ctrl+b</kbd> and navigation mode stays on until <kbd>Esc</kbd>.</span></p>
+    <table>
+      <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td><span data-l="ru">следующий / предыдущий агент</span><span data-l="en">next / previous agent</span></td></tr>
+      <tr><td><kbd>n</kbd></td><td><span data-l="ru">новый агент</span><span data-l="en">new agent</span></td></tr>
+      <tr><td><kbd>w</kbd></td><td><span data-l="ru">к агенту, который ждёт ответа</span><span data-l="en">jump to the waiting agent</span></td></tr>
+      <tr><td><kbd>v</kbd></td><td><span data-l="ru">изменения агента (git diff)</span><span data-l="en">agent's changes (git diff)</span></td></tr>
+      <tr><td><kbd>p</kbd></td><td><span data-l="ru">палитра команд</span><span data-l="en">command palette</span></td></tr>
+    </table>
+  </section>
+
+  <section id="docs">
+    <h2><span data-l="ru">Документация</span><span data-l="en">Documentation</span></h2>
+    <p class="sub"><span data-l="ru">Короткий README и подробные разделы.</span><span data-l="en">A short README and detailed guides.</span></p>
+    <div class="docs">
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/install.md"><b>Установка</b><span>macOS, Linux, обновление</span></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/usage.md"><b>Работа в интерфейсе</b><span>клавиши, мышь, группы</span></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/git.md"><b>Git</b><span>diff, commit, разрешения</span></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/automation.md"><b>Автоматизация</b><span>radar ctl, фон</span></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/integrations.md"><b>Статусы и уведомления</b><span>хуки, интеграции</span></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/config.md"><b>Настройки</b><span>config.toml, темы</span></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/install.md"><b>Install</b><span>macOS, Linux, updating</span></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/usage.md"><b>Using the UI</b><span>keys, mouse, groups</span></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/git.md"><b>Git</b><span>diff, commit, approvals</span></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/automation.md"><b>Automation</b><span>radar ctl, background</span></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/integrations.md"><b>Statuses and notifications</b><span>hooks, integrations</span></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/config.md"><b>Settings</b><span>config.toml, themes</span></a>
+    </div>
+  </section>
+
+  <footer>
+    <span>Radar · MIT</span>
+    <span><a href="https://github.com/off-art/radar">github.com/off-art/radar</a></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  function setLang(l) {
+    root.lang = l;
+    document.querySelectorAll('[data-l]').forEach(function (el) { el.classList.toggle('on', el.dataset.l === l); });
+    document.querySelectorAll('.seg button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.set === l)); });
+    try { localStorage.setItem('radar-lang', l); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('radar-lang'); } catch (e) {}
+  var initial = saved || ((navigator.language || 'ru').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en');
+  document.querySelectorAll('.seg button').forEach(function (b) { b.addEventListener('click', function () { setLang(b.dataset.set); }); });
+  setLang(initial);
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var t = document.getElementById('cmd').textContent;
+    if (navigator.clipboard) navigator.clipboard.writeText(t).catch(function () {});
+  });
+})();
+</script>
+</body>
+</html>
