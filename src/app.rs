@@ -7,6 +7,7 @@ use crate::menu::{filter_palette, Menu, MenuItem, PaletteEntry};
 use crate::notify::{self, Sound};
 use crate::session::{Attention, Msg, Session, SpawnCtx};
 use crate::status::Status;
+use crate::sync::MutexExt;
 use crate::textfield::TextField;
 use crate::ui;
 use anyhow::{anyhow, Result};
@@ -253,13 +254,13 @@ impl App {
     /// Проверяет в фоне, какие агенты установлены (параллельно, чтобы не тормозить запуск).
     fn detect_agents(&mut self) {
         let n = self.cfg.agents.len();
-        *self.available.lock().unwrap() = vec![None; n];
+        *self.available.lock_or_recover() = vec![None; n];
         for (i, def) in self.cfg.agents.iter().enumerate() {
             let bin = def.command.split_whitespace().next().unwrap_or("").to_string();
             let shared = self.available.clone();
             std::thread::spawn(move || {
                 let ok = crate::session::find_binary(&bin).is_some();
-                if let Some(slot) = shared.lock().unwrap().get_mut(i) {
+                if let Some(slot) = shared.lock_or_recover().get_mut(i) {
                     *slot = Some(ok);
                 }
             });
@@ -268,7 +269,7 @@ impl App {
 
     /// Установлен ли агент (пока проверка не закончилась — считаем, что да).
     pub fn agent_available(&self, i: usize) -> bool {
-        self.available.lock().unwrap().get(i).copied().flatten().unwrap_or(true)
+        self.available.lock_or_recover().get(i).copied().flatten().unwrap_or(true)
     }
 
     /// Агенты для выбора: только установленные, либо все.
@@ -467,7 +468,9 @@ impl App {
                         unknown += 1;
                         continue; // агента убрали из конфига — не трогаем
                     };
-                    found.push(Session::from_host(&def, meta, stream, self.tx.clone()));
+                    if let Ok(s) = Session::from_host(&def, meta, stream, self.tx.clone()) {
+                        found.push(s);
+                    }
                 }
                 Ok(None) => busy += 1,
                 Err(_) => {}
@@ -2624,7 +2627,7 @@ impl App {
     fn selection_text(&self, sel: &Selection) -> String {
         let Some(s) = self.sessions.get(sel.idx) else { return String::new() };
         let ((r0, c0), (r1, c1)) = sel.ordered();
-        let mut p = s.parser.lock().unwrap();
+        let mut p = s.parser.lock_or_recover();
         p.screen_mut().set_scrollback(s.scroll);
         let (_, cols) = p.screen().size();
         let text = p.screen().contents_between(r0, c0.min(cols), r1, (c1 + 1).min(cols));

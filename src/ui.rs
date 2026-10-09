@@ -5,6 +5,7 @@ use crate::menu::Menu;
 use crate::paths::short_path;
 use crate::session::Session;
 use crate::status::Status;
+use crate::sync::MutexExt;
 use crate::textfield::TextField;
 use crate::theme::Theme;
 use ratatui::buffer::Buffer;
@@ -331,7 +332,7 @@ fn is_zero_width(c: char) -> bool {
 }
 
 fn render_screen(buf: &mut Buffer, area: Rect, s: &Session, th: &Theme, sel: Option<((u16, u16), (u16, u16))>) {
-    let mut p = s.parser.lock().unwrap();
+    let mut p = s.parser.lock_or_recover();
     p.screen_mut().set_scrollback(s.scroll);
     {
         let screen = p.screen();
@@ -431,7 +432,7 @@ fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
 
     // курсор — только у активной панели
     if focused && matches!(app.mode, Mode::Normal) && s.is_running() && s.scroll == 0 {
-        let p = s.parser.lock().unwrap();
+        let p = s.parser.lock_or_recover();
         let screen = p.screen();
         if !screen.hide_cursor() {
             let (r, c) = screen.cursor_position();

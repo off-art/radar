@@ -2,7 +2,8 @@
 
 use crate::config::{AgentDef, Kind};
 use crate::status::{self, Signals, Status};
-use anyhow::Result;
+use crate::sync::MutexExt;
+use anyhow::{Context, Result};
 use ratatui::style::Color;
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -93,7 +94,7 @@ struct FrameWriter(Arc<Mutex<UnixStream>>);
 
 impl Write for FrameWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut c = self.0.lock().unwrap();
+        let mut c = self.0.lock_or_recover();
         crate::host::write_frame(&mut *c, b'I', buf)?;
         Ok(buf.len())
     }
@@ -245,17 +246,17 @@ impl Session {
         };
         crate::host::launch(&spec)?;
         match crate::host::attach(&sock)? {
-            Some((meta, stream)) => Ok(Session::from_host(def, meta, stream, tx)),
+            Some((meta, stream)) => Session::from_host(def, meta, stream, tx),
             None => Err(anyhow::anyhow!("агент уже подключён к другому окну")),
         }
     }
 
     /// Собирает сессию по метаданным и соединению с хозяином (новый агент или подключение к работающему).
-    pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Session {
+    pub fn from_host(def: &AgentDef, meta: crate::host::Meta, stream: UnixStream, tx: Sender<Msg>) -> Result<Session> {
         let id = meta.id;
         let (rows, cols) = (meta.rows, meta.cols);
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 5000)));
-        let conn = Arc::new(Mutex::new(stream.try_clone().expect("клонирование сокета")));
+        let conn = Arc::new(Mutex::new(stream.try_clone().context("клонирование сокета")?));
         let writer: Writer = Arc::new(Mutex::new(Box::new(FrameWriter(conn.clone()))));
         {
             let parser = parser.clone();
@@ -264,7 +265,7 @@ impl Session {
                 loop {
                     match crate::host::read_frame(&mut stream) {
                         Ok(Some((b'O', data))) => {
-                            feed(&mut parser.lock().unwrap(), &data);
+                            feed(&mut parser.lock_or_recover(), &data);
                             if tx.send(Msg::Output(id)).is_err() {
                                 break;
                             }
@@ -293,7 +294,7 @@ impl Session {
             });
         }
         let now = Instant::now();
-        Session {
+        Ok(Session {
             id,
             name: meta.name.clone(),
             agent: def.name.clone(),
@@ -324,7 +325,7 @@ impl Session {
             writer,
             conn,
             meta_sent: (meta.name, meta.resume_id, meta.muted),
-        }
+        })
     }
 
     /// Сообщает хозяину об изменении имени, диалога Claude или признака «тишина».
@@ -362,23 +363,23 @@ impl Session {
     }
 
     pub fn app_cursor(&self) -> bool {
-        self.parser.lock().unwrap().screen().application_cursor()
+        self.parser.lock_or_recover().screen().application_cursor()
     }
 
     pub fn bracketed_paste(&self) -> bool {
-        self.parser.lock().unwrap().screen().bracketed_paste()
+        self.parser.lock_or_recover().screen().bracketed_paste()
     }
 
     /// Режимы мыши, которые включил сам агент, и находится ли он на альтернативном экране.
     pub fn mouse_state(&self) -> (vt100::MouseProtocolMode, vt100::MouseProtocolEncoding, bool) {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let sc = p.screen();
         (sc.mouse_protocol_mode(), sc.mouse_protocol_encoding(), sc.alternate_screen())
     }
 
     /// Сколько строк истории можно прокрутить.
     pub fn max_scrollback(&self) -> usize {
-        let mut p = self.parser.lock().unwrap();
+        let mut p = self.parser.lock_or_recover();
         p.screen_mut().set_scrollback(usize::MAX);
         let n = p.screen().scrollback();
         p.screen_mut().set_scrollback(0);
@@ -460,7 +461,7 @@ impl Session {
             d.extend_from_slice(&cols.to_be_bytes());
             let _ = crate::host::write_frame(&mut *c, b'R', &d);
         }
-        self.parser.lock().unwrap().screen_mut().set_size(rows, cols);
+        self.parser.lock_or_recover().screen_mut().set_size(rows, cols);
     }
 
     /// Вызывается, когда агент что-то вывел.
@@ -490,7 +491,7 @@ impl Session {
 
     /// Вопрос агента и варианты ответа так, как они показаны на его экране (для диалога разрешения).
     pub fn prompt_excerpt(&self) -> Vec<String> {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let screen = p.screen();
         let (_, cols) = screen.size();
         let rows: Vec<String> = screen.rows(0, cols).collect();
@@ -499,7 +500,7 @@ impl Session {
 
     /// Последние `lines` непустых строк экрана (для `radar ctl read`).
     pub fn screen_text(&self, lines: usize) -> String {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let screen = p.screen();
         let (_, cols) = screen.size();
         let rows: Vec<String> = screen.rows(0, cols).map(|r| r.trim_end().to_string()).collect();
@@ -510,7 +511,7 @@ impl Session {
 
     /// Нижние строки экрана агента (для эвристики).
     fn tail_text(&self) -> String {
-        let p = self.parser.lock().unwrap();
+        let p = self.parser.lock_or_recover();
         let screen = p.screen();
         let (_, cols) = screen.size();
         let rows: Vec<String> = screen.rows(0, cols).filter(|r| !r.trim().is_empty()).collect();

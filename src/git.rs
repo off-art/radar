@@ -4,6 +4,7 @@
 //! чтобы не тормозить интерфейс. Не-git папки просто не показывают git-информацию.
 
 use crate::session::Msg;
+use crate::sync::MutexExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -222,7 +223,7 @@ impl Watcher {
                     continue;
                 }
                 last = Instant::now();
-                let targets = t.targets.lock().unwrap().clone();
+                let targets = t.targets.lock_or_recover().clone();
                 let mut seen: Vec<(PathBuf, Option<Info>)> = vec![];
                 for (id, dir) in targets {
                     let info = match seen.iter().find(|(d, _)| *d == dir) {
@@ -243,7 +244,7 @@ impl Watcher {
     }
 
     pub fn set_targets(&self, list: Vec<(u32, PathBuf)>) {
-        let mut t = self.targets.lock().unwrap();
+        let mut t = self.targets.lock_or_recover();
         if *t != list {
             *t = list;
             self.poke.store(true, Ordering::Relaxed);

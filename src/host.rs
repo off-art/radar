@@ -10,6 +10,7 @@
 //! События хуков агент шлёт хозяину «голым» JSON (первый байт `{`), хозяин пересылает их окну кадром `H`.
 
 use crate::paths::run_dir;
+use crate::sync::MutexExt;
 use anyhow::{anyhow, bail, Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const MAX_FRAME: usize = 8 << 20;
+
+/// Сколько ждать запись в окно: окно, которое не читает, не должно блокировать вывод агента.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Как запустить агента и что о нём помнить (хозяин получает это на stdin).
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -164,12 +168,12 @@ pub fn run_host() -> Result<()> {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        let mut client = sh.client.lock().unwrap();
-                        sh.parser.lock().unwrap().process(&buf[..n]);
+                        let mut client = sh.client.lock_or_recover();
+                        sh.parser.lock_or_recover().process(&buf[..n]);
                         answer_queries(&buf[..n], &writer, &sh.parser);
                         if let Some(c) = client.as_mut() {
                             if write_frame(c, b'O', &buf[..n]).is_err() {
-                                *client = None;
+                                drop_client(&mut client);
                             }
                         }
                     }
@@ -182,8 +186,8 @@ pub fn run_host() -> Result<()> {
         let sh = sh.clone();
         std::thread::spawn(move || {
             let code = child.wait().map_or(-1, |s| s.exit_code() as i32);
-            let mut client = sh.client.lock().unwrap();
-            *sh.exit.lock().unwrap() = Some(code);
+            let mut client = sh.client.lock_or_recover();
+            *sh.exit.lock_or_recover() = Some(code);
             if let Some(c) = client.as_mut() {
                 let _ = write_frame(c, b'X', &code.to_be_bytes());
             }
@@ -200,6 +204,14 @@ pub fn run_host() -> Result<()> {
     }
     let _ = killer.kill();
     Ok(())
+}
+
+/// Отключает окно, которое закрылось или не читает: агент продолжает работать, вывод больше не блокируется.
+/// Сокет закрывается явно — иначе окно осталось бы с оборванным кадром.
+fn drop_client(client: &mut Option<UnixStream>) {
+    if let Some(c) = client.take() {
+        let _ = c.shutdown(std::net::Shutdown::Both);
+    }
 }
 
 fn finish(sock: &Path, killer: &mut (dyn portable_pty::ChildKiller + Send + Sync)) -> ! {
@@ -227,7 +239,7 @@ fn serve(
     if first[0] == b'{' {
         let mut s = String::new();
         let _ = (&stream).take(1 << 20).read_to_string(&mut s);
-        if let Some(c) = sh.client.lock().unwrap().as_mut() {
+        if let Some(c) = sh.client.lock_or_recover().as_mut() {
             let _ = write_frame(c, b'H', s.as_bytes());
         }
         return;
@@ -241,20 +253,21 @@ fn serve(
     // подключение окна
     let _ = stream.set_read_timeout(None);
     {
-        let mut client = sh.client.lock().unwrap();
+        let mut client = sh.client.lock_or_recover();
         if client.is_some() {
             let _ = write_frame(&mut stream, b'B', b"");
             return;
         }
         let Ok(mut out) = stream.try_clone() else { return };
-        let meta = sh.meta.lock().unwrap().clone();
-        let snapshot = sh.parser.lock().unwrap().screen().state_formatted();
+        let _ = out.set_write_timeout(Some(WRITE_TIMEOUT));
+        let meta = sh.meta.lock_or_recover().clone();
+        let snapshot = sh.parser.lock_or_recover().screen().state_formatted();
         if write_frame(&mut out, b'M', &serde_json::to_vec(&meta).unwrap_or_default()).is_err()
             || write_frame(&mut out, b'O', &snapshot).is_err()
         {
             return;
         }
-        if let Some(code) = *sh.exit.lock().unwrap() {
+        if let Some(code) = *sh.exit.lock_or_recover() {
             let _ = write_frame(&mut out, b'X', &code.to_be_bytes());
         }
         *client = Some(out);
@@ -271,17 +284,17 @@ fn serve(
             Ok(Some((b'R', d))) if d.len() == 4 => {
                 let (rows, cols) = (u16::from_be_bytes([d[0], d[1]]), u16::from_be_bytes([d[2], d[3]]));
                 if rows > 0 && cols > 0 {
-                    let _guard = sh.client.lock().unwrap();
-                    let _ = master.lock().unwrap().resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
-                    sh.parser.lock().unwrap().screen_mut().set_size(rows, cols);
-                    let mut m = sh.meta.lock().unwrap();
+                    let _guard = sh.client.lock_or_recover();
+                    let _ = master.lock_or_recover().resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+                    sh.parser.lock_or_recover().screen_mut().set_size(rows, cols);
+                    let mut m = sh.meta.lock_or_recover();
                     m.rows = rows;
                     m.cols = cols;
                 }
             }
             Ok(Some((b'U', d))) => {
                 if let Ok(m) = serde_json::from_slice::<Meta>(&d) {
-                    let mut cur = sh.meta.lock().unwrap();
+                    let mut cur = sh.meta.lock_or_recover();
                     cur.name = m.name;
                     cur.resume_id = m.resume_id;
                     cur.muted = m.muted;
@@ -293,7 +306,7 @@ fn serve(
         }
     }
     // окно отключилось — агент продолжает работать
-    let mut client = sh.client.lock().unwrap();
+    let mut client = sh.client.lock_or_recover();
     *client = None;
 }
 
@@ -327,7 +340,7 @@ fn answer_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>, parse
         reply.extend_from_slice(b"\x1b[0n");
     }
     if contains(b"\x1b[6n") {
-        let (r, c) = parser.lock().unwrap().screen().cursor_position();
+        let (r, c) = parser.lock_or_recover().screen().cursor_position();
         reply.extend_from_slice(format!("\x1b[{};{}R", r + 1, c + 1).as_bytes());
     }
     if !reply.is_empty() {
@@ -417,6 +430,17 @@ mod tests {
         assert_eq!(read_frame(&mut r).unwrap(), Some((b'O', b"hello".to_vec())));
         assert_eq!(read_frame(&mut r).unwrap(), Some((b'X', 7i32.to_be_bytes().to_vec())));
         assert_eq!(read_frame(&mut r).unwrap(), None);
+    }
+
+    #[test]
+    fn drop_client_closes_socket() {
+        let (a, mut b) = UnixStream::pair().unwrap();
+        let mut client = Some(a);
+        drop_client(&mut client);
+        assert!(client.is_none());
+        // другая сторона видит конец потока, а не оборванный кадр
+        let mut buf = [0u8; 1];
+        assert_eq!(b.read(&mut buf).unwrap(), 0);
     }
 
     #[test]

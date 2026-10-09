@@ -19,6 +19,7 @@ mod paths;
 mod persist;
 mod session;
 mod status;
+mod sync;
 #[cfg(test)]
 mod testutil;
 mod textfield;
