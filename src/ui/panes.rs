@@ -144,8 +144,10 @@ pub(super) fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         f.render_widget(Paragraph::new(msg).style(Style::default().fg(th.on_color).bg(th.dim)), r);
     }
 
-    // курсор — только у активной панели
-    if focused && matches!(app.mode, Mode::Normal) && s.is_running() && s.scroll == 0 {
+    // курсор — только у активной панели. Пока агент работает, он постоянно перерисовывает экран, и курсор
+    // «прыгает» между точками вывода (на Windows это хорошо заметно), поэтому на это время его прячем.
+    let working = cfg!(windows) && matches!(s.status, Status::Working);
+    if focused && matches!(app.mode, Mode::Normal) && s.is_running() && s.scroll == 0 && !working {
         let p = s.parser.lock_or_recover();
         let screen = p.screen();
         if !screen.hide_cursor() {
