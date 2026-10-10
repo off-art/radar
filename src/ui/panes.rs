@@ -153,7 +153,18 @@ pub(super) fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         if !screen.hide_cursor() {
             let (r, c) = screen.cursor_position();
             if r < pane.inner.height && c < pane.inner.width {
-                f.set_cursor_position(Position::new(pane.inner.x + c, pane.inner.y + r));
+                let pos = Position::new(pane.inner.x + c, pane.inner.y + r);
+                if cfg!(windows) {
+                    // Аппаратный курсор Windows Terminal «ездит» по ячейкам при каждой перерисовке и сбивает
+                    // мигание, поэтому здесь он скрыт, а курсор рисуется ячейкой в обратных цветах.
+                    if let Some(cell) = f.buffer_mut().cell_mut(pos) {
+                        if !cell.modifier.contains(Modifier::REVERSED) {
+                            cell.modifier.insert(Modifier::REVERSED);
+                        }
+                    }
+                } else {
+                    f.set_cursor_position(pos);
+                }
             }
         }
     }

@@ -82,7 +82,13 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
             if due {
                 let size = terminal.size()?;
                 app.compute_layout(Rect::new(0, 0, size.width, size.height));
+                // Windows Terminal показывает промежуточные кадры: просим его показать кадр целиком.
+                #[cfg(windows)]
+                let _ =
+                    execute!(std::io::stdout(), crossterm::terminal::BeginSynchronizedUpdate, crossterm::cursor::Hide);
                 terminal.draw(|f| ui::draw(f, &app))?;
+                #[cfg(windows)]
+                let _ = execute!(std::io::stdout(), crossterm::terminal::EndSynchronizedUpdate);
                 app.dirty = false;
                 last_draw = Instant::now();
             }
