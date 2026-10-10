@@ -1,6 +1,6 @@
 [package]
 name = "radar"
-version = "0.6.11"
+version = "0.6.12"
 edition = "2021"
 rust-version = "1.88"
 description = "Терминальный мультиплексор для AI-агентов: список агентов, статусы, уведомления"
