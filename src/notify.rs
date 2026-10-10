@@ -186,14 +186,19 @@ fn send_windows(title: &str, body: &str, silent: bool) {
     );
     // Идентификатор приложения PowerShell: у Radar своей регистрации в системе нет
     let app = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
+    let err = std::env::temp_dir().join("radar-toast.err");
+    let errq = crate::winsh::ps_quote(&err.to_string_lossy());
     let script = format!(
-        "try {{ \
+        "$ErrorActionPreference = 'Stop'; \
+         try {{ \
            [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; \
            [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]; \
            $x = New-Object Windows.Data.Xml.Dom.XmlDocument; $x.LoadXml({xml}); \
            $toast = New-Object Windows.UI.Notifications.ToastNotification $x; \
-           [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app}').Show($toast) \
+           [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app}').Show($toast); \
+           Start-Sleep -Seconds 2; Remove-Item -LiteralPath {errq} -ErrorAction SilentlyContinue \
          }} catch {{ \
+           $_ | Out-String | Set-Content -LiteralPath {errq}; \
            Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
            $n = New-Object System.Windows.Forms.NotifyIcon; \
            $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; \
@@ -201,9 +206,25 @@ fn send_windows(title: &str, body: &str, silent: bool) {
            Start-Sleep -Seconds 9; $n.Dispose() \
          }}"
     );
+    // Скрипт идёт через файл: так нет путаницы с кавычками в командной строке. BOM нужен,
+    // чтобы Windows PowerShell 5.1 прочитал кириллицу как UTF-8.
+    let file = std::env::temp_dir().join(format!("radar-toast-{}.ps1", std::process::id()));
+    let mut data = vec![0xEF, 0xBB, 0xBF];
+    data.extend_from_slice(script.as_bytes());
+    if std::fs::write(&file, data).is_err() {
+        safety::trace("уведомление: не удалось записать скрипт");
+        return;
+    }
     safety::trace("уведомление: powershell toast");
-    let res = safety::run_quiet(&mut powershell(&script), Duration::from_secs(20));
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]).arg(&file);
+    crate::ipc::hide_window(&mut cmd);
+    let res = safety::run_quiet(&mut cmd, Duration::from_secs(20));
     safety::trace(&format!("уведомление: powershell завершён: {res:?}"));
+    if let Ok(e) = std::fs::read_to_string(&err) {
+        safety::trace(&format!("уведомление: ошибка тоста: {}", e.trim()));
+    }
+    let _ = std::fs::remove_file(&file);
 }
 
 /// Linux: `paplay`, при его отсутствии или ошибке — `aplay`. Каждая команда ограничена по времени.
