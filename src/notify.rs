@@ -170,18 +170,38 @@ fn powershell(script: &str) -> Command {
     cmd
 }
 
-/// Windows: всплывающая подсказка у значка в области уведомлений (живёт несколько секунд).
-fn send_windows(title: &str, body: &str) {
-    let t = crate::winsh::ps_quote(&safety::clean_text(title, 60));
-    let b = crate::winsh::ps_quote(&safety::clean_text(body, 200));
-    let script = format!(
-        "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
-         $n = New-Object System.Windows.Forms.NotifyIcon; \
-         $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; \
-         $n.ShowBalloonTip(8000, {t}, {b}, [System.Windows.Forms.ToolTipIcon]::None); \
-         Start-Sleep -Seconds 9; $n.Dispose()"
+/// Windows: тост (виден и в центре уведомлений). `silent` — без системного звука, чтобы он не накладывался
+/// на звук Radar. Если тост не показался, запасной вариант — подсказка у значка в трее.
+fn send_windows(title: &str, body: &str, silent: bool) {
+    let t = safety::escape_markup(&safety::clean_text(title, 60));
+    let b = safety::escape_markup(&safety::clean_text(body, 200));
+    let audio = if silent { "<audio silent=\"true\"/>" } else { "" };
+    let xml = format!(
+        "<toast><visual><binding template=\"ToastGeneric\"><text>{t}</text><text>{b}</text></binding></visual>{audio}</toast>"
     );
-    safety::trace("уведомление: powershell NotifyIcon");
+    let xml = crate::winsh::ps_quote(&xml);
+    let (tq, bq) = (
+        crate::winsh::ps_quote(&safety::clean_text(title, 60)),
+        crate::winsh::ps_quote(&safety::clean_text(body, 200)),
+    );
+    // Идентификатор приложения PowerShell: у Radar своей регистрации в системе нет
+    let app = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
+    let script = format!(
+        "try {{ \
+           [void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; \
+           [void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]; \
+           $x = New-Object Windows.Data.Xml.Dom.XmlDocument; $x.LoadXml({xml}); \
+           $toast = New-Object Windows.UI.Notifications.ToastNotification $x; \
+           [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app}').Show($toast) \
+         }} catch {{ \
+           Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
+           $n = New-Object System.Windows.Forms.NotifyIcon; \
+           $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; \
+           $n.ShowBalloonTip(8000, {tq}, {bq}, [System.Windows.Forms.ToolTipIcon]::None); \
+           Start-Sleep -Seconds 9; $n.Dispose() \
+         }}"
+    );
+    safety::trace("уведомление: powershell toast");
     let res = safety::run_quiet(&mut powershell(&script), Duration::from_secs(20));
     safety::trace(&format!("уведомление: powershell завершён: {res:?}"));
 }
@@ -369,13 +389,13 @@ fn send_via_osascript(title: &str, body: &str) {
     );
 }
 
-fn send(title: &str, body: &str) {
+fn send(title: &str, body: &str, silent: bool) {
     if is_mac() {
         if !send_via_helper(title, body) {
             send_via_osascript(title, body);
         }
     } else if cfg!(windows) {
-        send_windows(title, body);
+        send_windows(title, body, silent);
     } else {
         send_linux(title, body);
     }
@@ -406,7 +426,8 @@ pub fn notify(kind: Sound, title: &str, body: &str, s: &Settings) {
             return;
         }
         let (t, b) = (title.to_string(), body.to_string());
-        std::thread::spawn(move || send(&t, &b));
+        let silent = s.sound;
+        std::thread::spawn(move || send(&t, &b, silent));
     }
 }
 
@@ -483,7 +504,7 @@ pub fn self_test(s: &Settings) {
     play(Sound::Waiting, s);
     std::thread::sleep(std::time::Duration::from_millis(400));
     if s.popups {
-        send("Задача выполнена", "Claude Code · radar");
+        send("Задача выполнена", "Claude Code · radar", s.sound);
     } else {
         println!("  (всплывающие уведомления выключены в настройках — popups = false)");
     }

@@ -1,0 +1,212 @@
+diff --git a/README.en.md b/README.en.md
+index e2727e0..97799aa 100644
+--- a/README.en.md
++++ b/README.en.md
+@@ -47,6 +47,12 @@ brew install off-art/radar/radar
+ 
+ > Use the full name. The short `brew install radar` installs a different app (a menu-bar Radar from homebrew-cask).
+ 
++Windows 10/11 (x64, preview) — in PowerShell:
++
++```powershell
++irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
++```
++
+ Debian, Ubuntu, Linux Mint, SberOS: a `.deb` package, see [docs/en/install.md](docs/en/install.md#deb-package-debian-ubuntu-linux-mint-sberos).
+ 
+ No Rust, no admin rights. Update with `radar update` (for a brew install: `brew upgrade off-art/radar/radar`).
+diff --git a/README.md b/README.md
+index db72357..286f66e 100644
+--- a/README.md
++++ b/README.md
+@@ -47,6 +47,12 @@ brew install off-art/radar/radar
+ 
+ > Имя нужно писать полностью. Короткое `brew install radar` установит другое приложение (Radar для строки меню из homebrew-cask).
+ 
++Windows 10/11 (x64, предварительная поддержка) — в PowerShell:
++
++```powershell
++irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
++```
++
+ Debian, Ubuntu, Linux Mint, СберОС — пакет `.deb`: [docs/ru/install.md](docs/ru/install.md#пакет-deb-debian-ubuntu-linux-mint-сберос).
+ 
+ Ни Rust, ни прав администратора не нужно. Обновление: `radar update` (для установки через brew — `brew upgrade off-art/radar/radar`).
+diff --git a/ROADMAP.md b/ROADMAP.md
+index 572be46..e2c9c18 100644
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -49,7 +49,7 @@
+ | # | Фича | Размер | Заметки |
+ |---|---|---|---|
+ | 15 | ✅ Homebrew: tap `off-art/homebrew-radar` (`brew install off-art/radar/radar`) | S | Сделано в v0.6.9–0.6.10. Формула на готовых бинарниках релиза, обновление из CI (job `homebrew`, SSH deploy-ключ `TAP_DEPLOY_KEY`), `radar update` под brew подсказывает `brew upgrade off-art/radar/radar` (короткое `radar` в brew — это cask из homebrew/cask). homebrew-core — позже, когда будет аудитория |
+-| 16 | Нативный Windows | L | Сейчас — только WSL2 (как Linux-версия). Нужны: транспорт вместо unix-сокетов, ConPTY, сборка `x86_64-pc-windows-msvc`, установщик |
++| 16 | Нативный Windows | L | В работе (ветка `feature/windows`, PR #15): сокеты через `uds_windows`, запуск через PowerShell, поиск агентов по PATH/PATHEXT, звук и уведомления, `install.ps1`, `radar update`, сборка `x86_64-pc-windows-msvc` в релизе. Проверено на Windows 11 с OpenCode; Claude Code и остальные агенты — предстоит |
+ | 17 | ✅ Пакет `.deb` (amd64, arm64) в релизах | S | Собирается в CI из готового бинарника (`cargo-deb`), ссылка `releases/latest/download/radar_<arch>.deb`; `radar update` для установки из `/usr/` подсказывает команды |
+ | 18 | `cargo install` / crates.io | S | Имя `radar` на crates.io занято другим проектом (0.1.0): нужно другое имя пакета (например `radar-tui`, бинарник остаётся `radar`) |
+ 
+diff --git a/docs/en/install.md b/docs/en/install.md
+index bae9889..1a0ec6f 100644
+--- a/docs/en/install.md
++++ b/docs/en/install.md
+@@ -2,7 +2,7 @@
+ 
+ [← README](../../README.en.md) · [Русский](../ru/install.md)
+ 
+-No Rust, no admin rights needed. Supported: macOS (Apple Silicon and Intel) and Linux (`x86_64`, `aarch64`).
++No Rust, no admin rights needed. Supported: macOS (Apple Silicon and Intel), Linux (`x86_64`, `aarch64`) and Windows 10/11 x64 (preview).
+ 
+ ## Method 1: one command (recommended)
+ 
+@@ -81,6 +81,21 @@ Notifications and sound need `libnotify-bin` (`notify-send`) and `pulseaudio-uti
+ `xclip`/`xsel` (X11) if installed, otherwise via OSC 52 (your terminal must support it).
+ From source: `sudo apt install build-essential curl git`, then Rust and `./install.sh`.
+ 
++## Windows 10/11 (preview)
++
++In PowerShell, no admin rights needed:
++
++```powershell
++irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
++```
++
++The script puts `radar.exe` into `%LOCALAPPDATA%\radar` and adds the folder to `PATH` (visible in new PowerShell windows). Run Radar in Windows Terminal. Pre-release builds: set `$env:RADAR_VERSION = 'v0.7.0-win.1'` before the command above.
++
++- Agents start through PowerShell (`pwsh`, or the built-in `powershell` if it is missing) and are found on `PATH`, including npm `.cmd` wrappers.
++- Sound uses the system WAV player; notifications are balloon tips from the tray icon.
++- Update: `radar update`. Uninstall: delete `%LOCALAPPDATA%\radar` and the config `%USERPROFILE%\.config\radar`.
++- Windows support is a preview: the main flows are verified with OpenCode, other agents are still being checked.
++
+ ## After installing
+ 
+ ```sh
+diff --git a/docs/ru/install.md b/docs/ru/install.md
+index 55fd599..b9e807d 100644
+--- a/docs/ru/install.md
++++ b/docs/ru/install.md
+@@ -2,7 +2,7 @@
+ 
+ [← README](../../README.md) · [English](../en/install.md)
+ 
+-Не нужны ни Rust, ни права администратора. Поддерживаются macOS (Apple Silicon и Intel) и Linux (`x86_64`, `aarch64`).
++Не нужны ни Rust, ни права администратора. Поддерживаются macOS (Apple Silicon и Intel), Linux (`x86_64`, `aarch64`) и Windows 10/11 x64 (предварительно).
+ 
+ ## Способ 1 — одной командой (рекомендуется)
+ 
+@@ -81,6 +81,21 @@ mkdir -p ~/.local/bin && rm -f ~/.local/bin/radar && mv radar ~/.local/bin/
+ `xclip`/`xsel` (X11), если они установлены, иначе через OSC 52 (терминал должен его поддерживать).
+ Из исходников: `sudo apt install build-essential curl git`, затем Rust и `./install.sh`.
+ 
++## Windows 10/11 (предварительная поддержка)
++
++В PowerShell, права администратора не нужны:
++
++```powershell
++irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
++```
++
++Скрипт кладёт `radar.exe` в `%LOCALAPPDATA%\radar` и добавляет папку в `PATH` (в новых окнах PowerShell). Запускайте Radar в Windows Terminal. Пробные выпуски ставятся так: `$env:RADAR_VERSION = 'v0.7.0-win.1'` перед командой выше.
++
++- Агенты запускаются через PowerShell (`pwsh`, а если его нет — встроенный `powershell`) и ищутся по `PATH`, включая npm-обёртки `.cmd`.
++- Звук проигрывается системным плеером WAV, уведомления — всплывающие подсказки у значка в трее.
++- Обновление: `radar update`. Удаление: удалите папку `%LOCALAPPDATA%\radar` и конфиг `%USERPROFILE%\.config\radar`.
++- Windows пока в предварительной поддержке: основные сценарии проверены с OpenCode, остальные агенты — в процессе.
++
+ ## После установки
+ 
+ ```sh
+diff --git a/src/update.rs b/src/update.rs
+index fccaa7a..c2c479a 100644
+--- a/src/update.rs
++++ b/src/update.rs
+@@ -33,7 +33,26 @@ fn target() -> Result<&'static str> {
+         ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
+         ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
+         ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
+-        (os, arch) => bail!("обновление поддерживается на macOS и Linux (у вас {os}/{arch})"),
++        ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),
++        (os, arch) => bail!("обновление поддерживается на macOS, Linux и Windows x64 (у вас {os}/{arch})"),
++    }
++}
++
++/// Имя файла релиза: на Windows — zip, на остальных системах — tar.gz.
++pub fn asset_name(target: &str) -> String {
++    if target.contains("windows") {
++        format!("radar-{target}.zip")
++    } else {
++        format!("radar-{target}.tar.gz")
++    }
++}
++
++/// Имя исполняемого файла внутри архива.
++fn exe_name() -> &'static str {
++    if cfg!(windows) {
++        "radar.exe"
++    } else {
++        "radar"
+     }
+ }
+ 
+@@ -65,6 +84,24 @@ pub fn latest_version() -> Result<String> {
+     parse_tag(&String::from_utf8_lossy(&out.stdout)).context("на GitHub пока нет опубликованных релизов")
+ }
+ 
++/// Распаковывает архив релиза в `dest`: на Windows — штатным `Expand-Archive` (zip), иначе `tar xzf`.
++fn extract(archive: &Path, dest: &Path) -> Result<()> {
++    if cfg!(windows) {
++        // пути вставляются в сам скрипт: аргументы после -Command к скрипту не передаются
++        let script = format!(
++            "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
++            crate::winsh::ps_quote(&archive.to_string_lossy()),
++            crate::winsh::ps_quote(&dest.to_string_lossy())
++        );
++        let mut cmd = Command::new("powershell.exe");
++        cmd.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &script]);
++        crate::ipc::hide_window(&mut cmd);
++        run(&mut cmd, "распаковать архив")
++    } else {
++        run(Command::new("tar").arg("xzf").arg(archive).arg("-C").arg(dest), "распаковать архив")
++    }
++}
++
+ fn run(cmd: &mut Command, what: &str) -> Result<()> {
+     let st = cmd.status().with_context(|| format!("не удалось запустить: {what}"))?;
+     if !st.success() {
+@@ -129,17 +166,18 @@ pub fn run_update(check_only: bool) -> Result<()> {
+     let tmp = std::env::temp_dir().join(format!("radar-update-{}", std::process::id()));
+     std::fs::create_dir_all(&tmp)?;
+     let result = (|| -> Result<()> {
+-        let tgz = tmp.join("radar.tar.gz");
++        let asset = asset_name(t);
++        let archive = tmp.join(&asset);
+         println!("Скачиваю…");
+         run(
+             Command::new("curl")
+                 .args(["-fsSL", "-o"])
+-                .arg(&tgz)
+-                .arg(format!("https://github.com/{}/releases/download/v{latest}/radar-{t}.tar.gz", repo())),
++                .arg(&archive)
++                .arg(format!("https://github.com/{}/releases/download/v{latest}/{asset}", repo())),
+             "скачать архив релиза",
+         )?;
+-        run(Command::new("tar").arg("xzf").arg(&tgz).arg("-C").arg(&tmp), "распаковать архив")?;
+-        let new = tmp.join("radar");
++        extract(&archive, &tmp)?;
++        let new = tmp.join(exe_name());
+         let ver = Command::new(&new).arg("--version").output().context("новый файл не запускается")?;
+         if !String::from_utf8_lossy(&ver.stdout).contains(&latest) {
+             bail!("в архиве не та версия — обновление отменено");
+@@ -162,6 +200,13 @@ mod tests {
+         assert_eq!(parse_tag("https://github.com/off-art/radar/releases"), None);
+     }
+ 
++    #[test]
++    fn asset_names() {
++        assert_eq!(asset_name("x86_64-pc-windows-msvc"), "radar-x86_64-pc-windows-msvc.zip");
++        assert_eq!(asset_name("aarch64-apple-darwin"), "radar-aarch64-apple-darwin.tar.gz");
++        assert_eq!(asset_name("x86_64-unknown-linux-gnu"), "radar-x86_64-unknown-linux-gnu.tar.gz");
++    }
++
+     #[test]
+     fn brew_detection() {
+         assert!(is_brew_install(Path::new("/opt/homebrew/Cellar/radar/0.6.8/bin/radar")));
