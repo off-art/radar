@@ -20,7 +20,7 @@ brew install off-art/radar/radar
 brew upgrade off-art/radar/radar   # update
 ```
 
-Works on macOS and Linuxbrew. For such an install `radar update` prints the `brew upgrade off-art/radar/radar` hint.
+Use the full name: the short `brew install radar` installs a different app (a menu-bar Radar from homebrew-cask). Works on macOS and Linuxbrew. For such an install `radar update` prints the `brew upgrade off-art/radar/radar` hint.
 
 ## Method 3: manual archive
 

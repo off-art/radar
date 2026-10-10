@@ -20,7 +20,7 @@ brew install off-art/radar/radar
 brew upgrade off-art/radar/radar   # обновление
 ```
 
-Работает на macOS и в Linuxbrew. `radar update` для такой установки подскажет команду `brew upgrade off-art/radar/radar`.
+Имя нужно писать полностью: короткое `brew install radar` установит другое приложение (Radar для строки меню из homebrew-cask). Работает на macOS и в Linuxbrew. `radar update` для такой установки подскажет команду `brew upgrade off-art/radar/radar`.
 
 ## Способ 3 — архив вручную
 
