@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bas
 
 Или через Homebrew (macOS и Linux): `brew install off-art/radar/radar`.
 
-Ни Rust, ни прав администратора не нужно. Обновление: `radar update` (для установки через brew — `brew upgrade radar`).
+Ни Rust, ни прав администратора не нужно. Обновление: `radar update` (для установки через brew — `brew upgrade off-art/radar/radar`).
 Ручная установка, Linux, удаление — в [docs/ru/install.md](docs/ru/install.md).
 
 ## Быстрый старт

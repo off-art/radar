@@ -17,10 +17,10 @@ Files fetched with `curl` are not quarantined by macOS.
 
 ```sh
 brew install off-art/radar/radar
-brew upgrade radar   # update
+brew upgrade off-art/radar/radar   # update
 ```
 
-Works on macOS and Linuxbrew. For such an install `radar update` prints the `brew upgrade radar` hint.
+Works on macOS and Linuxbrew. For such an install `radar update` prints the `brew upgrade off-art/radar/radar` hint.
 
 ## Method 3: manual archive
 
