@@ -29,9 +29,23 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar -czf ../../../radar-${{ matrix.target }}.tar.gz radar
+      # .deb для Debian/Ubuntu/Mint/СберОС: собирается из уже готового бинарника,
+      # поэтому зависимость от glibc определяется старым образом ubuntu-22.04
+      - name: Собрать .deb
+        if: runner.os == 'Linux'
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb --no-build --deb-revision "" --target ${{ matrix.target }} --output target/deb/
+          # постоянное имя radar_<arch>.deb, чтобы работала ссылка releases/latest/download/…
+          for f in target/deb/*.deb; do
+            arch=$(dpkg-deb -f "$f" Architecture)
+            mv "$f" "target/deb/radar_${arch}.deb"
+          done
       - uses: softprops/action-gh-release@v2
         with:
-          files: radar-${{ matrix.target }}.tar.gz
+          files: |
+            radar-${{ matrix.target }}.tar.gz
+            target/deb/*.deb
 
   # Обновляет формулу в tap off-art/homebrew-radar. Нужен секрет TAP_DEPLOY_KEY:
   # приватная часть SSH deploy-ключа с правом записи, добавленного в репозиторий homebrew-radar.

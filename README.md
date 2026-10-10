@@ -47,6 +47,8 @@ brew install off-art/radar/radar
 
 > Имя нужно писать полностью. Короткое `brew install radar` установит другое приложение (Radar для строки меню из homebrew-cask).
 
+Debian, Ubuntu, Linux Mint, СберОС — пакет `.deb`: [docs/ru/install.md](docs/ru/install.md#пакет-deb-debian-ubuntu-linux-mint-сберос).
+
 Ни Rust, ни прав администратора не нужно. Обновление: `radar update` (для установки через brew — `brew upgrade off-art/radar/radar`).
 Ручная установка, Linux, удаление — в [docs/ru/install.md](docs/ru/install.md).
 

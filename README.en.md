@@ -47,6 +47,8 @@ brew install off-art/radar/radar
 
 > Use the full name. The short `brew install radar` installs a different app (a menu-bar Radar from homebrew-cask).
 
+Debian, Ubuntu, Linux Mint, SberOS: a `.deb` package, see [docs/en/install.md](docs/en/install.md#deb-package-debian-ubuntu-linux-mint-sberos).
+
 No Rust, no admin rights. Update with `radar update` (for a brew install: `brew upgrade off-art/radar/radar`).
 Manual install, Linux and uninstall: [docs/en/install.md](docs/en/install.md).
 
