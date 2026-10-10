@@ -59,6 +59,16 @@ The first build takes about two minutes. Alternative: `cargo install --path .` (
 Prebuilt binaries exist for `x86_64` and `aarch64` (glibc 2.35+: Debian 12/13, Ubuntu 22.04+). Verified on Debian 13 (aarch64, container):
 install, `radar update`, background sessions, `radar stop`. Install and update work the same way as above.
 
+### .deb package (Debian, Ubuntu, Linux Mint, SberOS)
+
+```sh
+curl -fsSLO https://github.com/off-art/radar/releases/latest/download/radar_$(dpkg --print-architecture).deb
+sudo apt install ./radar_$(dpkg --print-architecture).deb
+```
+
+Installs `/usr/bin/radar` and pulls the recommended `libnotify-bin`, `pulseaudio-utils`, `xclip` (notifications, sound, clipboard). The architecture is detected automatically (`amd64` or `arm64`).
+To update, run the same two commands; `radar update` prints them for such an install. To remove: `sudo apt remove radar`.
+
 If GitHub is unreachable from your network, download `radar-x86_64-unknown-linux-gnu.tar.gz` (or `aarch64`) from Releases and:
 
 ```sh
@@ -90,6 +100,8 @@ radar update            # downloads the latest version and replaces itself
 radar update --check    # only check whether a newer version exists
 ```
 
+For a brew install `radar update` prints `brew upgrade off-art/radar/radar`; for a `.deb` it prints the package download commands.
+
 If you are on 0.3.0 or older, `radar update` does not exist yet: update once by re-running the install command (method 1); after that `radar update` is enough.
 
 Manually (archive): **delete** the old binary first, then put the new one in place:
@@ -107,6 +119,6 @@ radar --version
 ```sh
 radar stop                          # stop agents running in the background
 radar integration uninstall all     # if you enabled integrations: removes Radar hooks from agent configs
-rm ~/.local/bin/radar
+rm ~/.local/bin/radar               # .deb: sudo apt remove radar; brew: brew uninstall off-art/radar/radar
 rm -rf ~/.config/radar ~/.radar     # settings, agent list, notification helper, git worktrees (optional)
 ```

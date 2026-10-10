@@ -43,6 +43,11 @@ pub fn is_brew_install(exe: &Path) -> bool {
     exe.components().any(|c| c.as_os_str() == "Cellar")
 }
 
+/// Бинарник поставлен системным пакетом (`.deb`): лежит в `/usr/`, обновлять его должен пакетный менеджер.
+pub fn is_system_install(exe: &Path) -> bool {
+    exe.starts_with("/usr/") && !exe.starts_with("/usr/local/")
+}
+
 fn repo() -> String {
     std::env::var("RADAR_REPO").unwrap_or_else(|_| REPO.to_string())
 }
@@ -112,6 +117,15 @@ pub fn run_update(check_only: bool) -> Result<()> {
         println!("  brew update && brew upgrade off-art/radar/radar");
         return Ok(());
     }
+    if is_system_install(&exe) {
+        println!("Radar установлен системным пакетом (.deb) — обновите так:");
+        println!(
+            "  curl -fsSLO https://github.com/{}/releases/latest/download/radar_$(dpkg --print-architecture).deb",
+            repo()
+        );
+        println!("  sudo apt install ./radar_$(dpkg --print-architecture).deb");
+        return Ok(());
+    }
     let t = target()?;
     let tmp = std::env::temp_dir().join(format!("radar-update-{}", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
@@ -154,6 +168,13 @@ mod tests {
         assert!(is_brew_install(Path::new("/opt/homebrew/Cellar/radar/0.6.8/bin/radar")));
         assert!(is_brew_install(Path::new("/home/linuxbrew/.linuxbrew/Cellar/radar/0.6.8/bin/radar")));
         assert!(!is_brew_install(Path::new("/Users/a/.local/bin/radar")));
+    }
+
+    #[test]
+    fn system_install_detection() {
+        assert!(is_system_install(Path::new("/usr/bin/radar")));
+        assert!(!is_system_install(Path::new("/usr/local/bin/radar")));
+        assert!(!is_system_install(Path::new("/home/a/.local/bin/radar")));
     }
 
     #[test]

@@ -59,6 +59,16 @@ cd radar
 Готовые сборки есть для `x86_64` и `aarch64` (glibc 2.35+: Debian 12/13, Ubuntu 22.04+). Проверено на Debian 13 (aarch64, контейнер):
 установка, `radar update`, фоновые сессии, `radar stop`. Установка и обновление те же, что выше.
 
+### Пакет .deb (Debian, Ubuntu, Linux Mint, СберОС)
+
+```sh
+curl -fsSLO https://github.com/off-art/radar/releases/latest/download/radar_$(dpkg --print-architecture).deb
+sudo apt install ./radar_$(dpkg --print-architecture).deb
+```
+
+Ставит `/usr/bin/radar` и подтягивает рекомендуемые `libnotify-bin`, `pulseaudio-utils`, `xclip` (для уведомлений, звука и буфера обмена). Архитектура определяется автоматически (`amd64` или `arm64`).
+Обновление: те же две команды. `radar update` для такой установки подскажет их сам. Удаление: `sudo apt remove radar`.
+
 Если GitHub с вашей сети недоступен — скачайте `radar-x86_64-unknown-linux-gnu.tar.gz` (или `aarch64`) на странице Releases и:
 
 ```sh
@@ -90,6 +100,8 @@ radar update            # скачает последнюю версию и за
 radar update --check    # только проверить, есть ли новая
 ```
 
+Для установки через brew `radar update` подскажет `brew upgrade off-art/radar/radar`, для `.deb` — команды скачивания пакета.
+
 Если у вас версия 0.3.0 или старше, команды `radar update` ещё нет: один раз обновитесь повторной командой установки (способ 1), дальше хватит `radar update`.
 
 Вручную (архив): сначала **удалите** старый бинарник, потом положите новый:
@@ -107,6 +119,6 @@ radar --version
 ```sh
 radar stop                          # остановить агентов, работающих в фоне
 radar integration uninstall all     # если включали интеграции: убирает хуки Radar из конфигов агентов
-rm ~/.local/bin/radar
+rm ~/.local/bin/radar                # для .deb: sudo apt remove radar, для brew: brew uninstall off-art/radar/radar
 rm -rf ~/.config/radar ~/.radar     # настройки, список агентов, помощник уведомлений, git-worktree (необязательно)
 ```
