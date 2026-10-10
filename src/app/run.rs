@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 /// Выключает режимы терминала, которые Radar включает сам (мышь, вставка, фокус).
 fn disable_extra_modes() {
     let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste, DisableFocusChange);
+    #[cfg(windows)]
+    let _ = execute!(std::io::stdout(), crossterm::cursor::SetCursorStyle::DefaultUserShape);
 }
 
 /// `ratatui::init` при панике возвращает только raw-режим и основной экран. Мышь, bracketed paste и фокус
@@ -38,6 +40,10 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
     }
     let mut out = std::io::stdout();
     let _ = execute!(out, EnableBracketedPaste, EnableFocusChange);
+    // Windows Terminal сбрасывает фазу мигания при каждой перерисовке, а во время анимации она идёт десять раз
+    // в секунду: курсор «дрожит». Неподвижный курсор этого лишён.
+    #[cfg(windows)]
+    let _ = execute!(out, crossterm::cursor::SetCursorStyle::SteadyBlock);
     if app.cfg.mouse {
         let _ = execute!(out, EnableMouseCapture);
     }
