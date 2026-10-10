@@ -48,7 +48,7 @@
 ## v0.7 — «Дистрибуция и платформы» (P1)
 | # | Фича | Размер | Заметки |
 |---|---|---|---|
-| 15 | Homebrew: tap `off-art/homebrew-radar` (`brew install off-art/radar/radar`) | S | Формула на готовых бинарниках релиза, обновление из CI (job `homebrew` в `release.yml`), `radar update` под brew подсказывает `brew upgrade`. homebrew-core — позже, когда будет аудитория |
+| 15 | ✅ Homebrew: tap `off-art/homebrew-radar` (`brew install off-art/radar/radar`) | S | Сделано в v0.6.9–0.6.10. Формула на готовых бинарниках релиза, обновление из CI (job `homebrew`, SSH deploy-ключ `TAP_DEPLOY_KEY`), `radar update` под brew подсказывает `brew upgrade off-art/radar/radar` (короткое `radar` в brew — это cask из homebrew/cask). homebrew-core — позже, когда будет аудитория |
 | 16 | Нативный Windows | L | Сейчас — только WSL2 (как Linux-версия). Нужны: транспорт вместо unix-сокетов, ConPTY, сборка `x86_64-pc-windows-msvc`, установщик |
 
 ## v0.6+ — позже (P2)
