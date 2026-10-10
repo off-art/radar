@@ -39,7 +39,9 @@ Also: a grid of up to 9 agents, groups, git worktree isolation, an event log, 12
 curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash
 ```
 
-No Rust, no brew, no admin rights. Update later with `radar update`.
+Or with Homebrew (macOS and Linux): `brew install off-art/radar/radar`.
+
+No Rust, no admin rights. Update with `radar update` (for a brew install: `brew upgrade radar`).
 Manual install, Linux and uninstall: [docs/en/install.md](docs/en/install.md).
 
 ## Quick start

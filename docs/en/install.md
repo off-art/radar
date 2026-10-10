@@ -2,7 +2,7 @@
 
 [← README](../../README.en.md) · [Русский](../ru/install.md)
 
-No brew, no Rust, no admin rights needed. Supported: macOS (Apple Silicon and Intel) and Linux (`x86_64`, `aarch64`).
+No Rust, no admin rights needed. Supported: macOS (Apple Silicon and Intel) and Linux (`x86_64`, `aarch64`).
 
 ## Method 1: one command (recommended)
 
@@ -13,7 +13,16 @@ curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bas
 The script downloads a prebuilt binary for your CPU into `~/.local/bin` and tells you what to add to `PATH`.
 Files fetched with `curl` are not quarantined by macOS.
 
-## Method 2: manual archive
+## Method 2: Homebrew
+
+```sh
+brew install off-art/radar/radar
+brew upgrade radar   # update
+```
+
+Works on macOS and Linuxbrew. For such an install `radar update` prints the `brew upgrade radar` hint.
+
+## Method 3: manual archive
 
 1. On the [Releases](https://github.com/off-art/radar/releases/latest) page download `radar-aarch64-apple-darwin.tar.gz`
    (Apple Silicon: M1/M2/M3…) or `radar-x86_64-apple-darwin.tar.gz` (Intel). Check your CPU with `uname -m` (`arm64` = Apple Silicon, `x86_64` = Intel).
@@ -32,7 +41,7 @@ Files fetched with `curl` are not quarantined by macOS.
 Without `xattr`, macOS says it cannot verify the developer: go to *System Settings → Privacy & Security → "Open Anyway"*.
 The same archive can be sent to a colleague over a messenger.
 
-## Method 3: from source
+## Method 4: from source
 
 Rust is required. Without brew:
 

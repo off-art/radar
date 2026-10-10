@@ -39,7 +39,9 @@ Claude Code, Codex, OpenCode, Qwen Code, GigaCode, Gemini CLI и обычный 
 curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash
 ```
 
-Ни Rust, ни brew, ни прав администратора не нужно. Дальше обновляйтесь командой `radar update`.
+Или через Homebrew (macOS и Linux): `brew install off-art/radar/radar`.
+
+Ни Rust, ни прав администратора не нужно. Обновление: `radar update` (для установки через brew — `brew upgrade radar`).
 Ручная установка, Linux, удаление — в [docs/ru/install.md](docs/ru/install.md).
 
 ## Быстрый старт
