@@ -119,6 +119,12 @@ impl Write for FrameWriter {
 
 /// Шелл пользователя: $SHELL, если он существует, иначе zsh (macOS), bash или sh
 /// (в контейнерах и минимальных Linux $SHELL часто не задан).
+#[cfg(windows)]
+pub fn default_shell() -> String {
+    crate::winsh::ps_exe()
+}
+
+#[cfg(unix)]
 pub fn default_shell() -> String {
     let ok = |p: &str| std::path::Path::new(p).is_file();
     if let Ok(s) = std::env::var("SHELL") {
@@ -136,6 +142,21 @@ pub fn shq(s: &str) -> String {
 /// Ищет команды так, как их найдёт запускаемый агент: через login+interactive shell
 /// (подхватывает PATH из .zprofile/.zshrc — nvm, brew и т. п.). Возвращает полные пути в порядке `bins`.
 /// Один шелл на все команды: каждый такой шелл читает rc-файлы пользователя, а они бывают тяжёлыми.
+#[cfg(windows)]
+pub fn find_binaries(bins: &[&str]) -> Vec<Option<String>> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let ext = crate::winsh::pathext();
+    bins.iter()
+        .map(|b| {
+            if *b == "$SHELL" {
+                return Some(default_shell());
+            }
+            crate::winsh::find_in_path(b, &path, &ext).map(|p| p.to_string_lossy().to_string())
+        })
+        .collect()
+}
+
+#[cfg(unix)]
 pub fn find_binaries(bins: &[&str]) -> Vec<Option<String>> {
     let names: Vec<&str> = bins.iter().copied().filter(|b| *b != "$SHELL").collect();
     let mut paths: std::collections::HashMap<String, String> = std::collections::HashMap::new();
@@ -186,6 +207,55 @@ pub fn feed(parser: &mut vt100::Parser, data: &[u8]) {
     parser.process(rest);
 }
 
+/// Шелл и аргументы для запуска агента (или просто шелла). Unix: login+interactive шелл и `exec`,
+/// чтобы подхватить PATH из .zprofile/.zshrc (nvm, brew и т. п.).
+#[cfg(unix)]
+fn launch_command(def: &AgentDef, ctx: &SpawnCtx, resume: Option<&str>) -> (String, Vec<String>) {
+    let shell = default_shell();
+    if def.kind == Kind::Shell {
+        return (shell, vec!["-l".into()]);
+    }
+    let mut line = format!("exec {}", def.command);
+    for a in &def.args {
+        line.push(' ');
+        line.push_str(&shq(a));
+    }
+    if def.kind == Kind::Claude {
+        if let Some(s) = &ctx.claude_settings {
+            line.push_str(" --settings ");
+            line.push_str(&shq(&s.to_string_lossy()));
+        }
+        if let Some(r) = resume {
+            line.push_str(" --resume ");
+            line.push_str(&shq(r));
+        }
+    }
+    (shell, vec!["-l".into(), "-i".into(), "-c".into(), line])
+}
+
+/// Windows: PowerShell. Агент запускается командой `& имя 'арг' …` (находит и `.exe`, и npm-обёртки `.cmd`);
+/// профиль пользователя не читается — PATH на Windows задаётся самой системой.
+#[cfg(windows)]
+fn launch_command(def: &AgentDef, ctx: &SpawnCtx, resume: Option<&str>) -> (String, Vec<String>) {
+    let shell = default_shell();
+    if def.kind == Kind::Shell {
+        return (shell, vec!["-NoLogo".into()]);
+    }
+    let mut args = def.args.clone();
+    if def.kind == Kind::Claude {
+        if let Some(s) = &ctx.claude_settings {
+            args.push("--settings".into());
+            args.push(s.to_string_lossy().to_string());
+        }
+        if let Some(r) = resume {
+            args.push("--resume".into());
+            args.push(r.to_string());
+        }
+    }
+    let line = crate::winsh::agent_line(&def.command, &args);
+    (shell, vec!["-NoLogo".into(), "-NoProfile".into(), "-Command".into(), line])
+}
+
 impl Session {
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
@@ -200,28 +270,7 @@ impl Session {
         resume: Option<&str>,
     ) -> Result<Session> {
         let (rows, cols) = size;
-        let shell = default_shell();
-        let args: Vec<String> = if def.kind == Kind::Shell {
-            vec!["-l".into()]
-        } else {
-            let mut line = format!("exec {}", def.command);
-            for a in &def.args {
-                line.push(' ');
-                line.push_str(&shq(a));
-            }
-            if def.kind == Kind::Claude {
-                if let Some(s) = &ctx.claude_settings {
-                    line.push_str(" --settings ");
-                    line.push_str(&shq(&s.to_string_lossy()));
-                }
-                if let Some(r) = resume {
-                    line.push_str(" --resume ");
-                    line.push_str(&shq(r));
-                }
-            }
-            // login + interactive: подхватываем PATH из .zprofile/.zshrc (nvm, brew и т.п.)
-            vec!["-l".into(), "-i".into(), "-c".into(), line]
-        };
+        let (shell, args) = launch_command(def, ctx, resume);
         let sock = crate::host::new_sock_path(id);
         let sv = |s: &str| s.to_string();
         let spec = crate::host::Spec {
@@ -721,7 +770,7 @@ pub fn excerpt(rows: &[String]) -> Vec<String> {
     lines[start..end].to_vec()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod find_tests {
     use super::*;
 

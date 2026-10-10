@@ -28,6 +28,8 @@ mod textfield;
 mod theme;
 mod ui;
 mod update;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod winsh;
 
 use anyhow::Result;
 use std::path::PathBuf;

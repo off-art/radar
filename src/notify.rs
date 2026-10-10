@@ -146,10 +146,44 @@ pub fn play(kind: Sound, s: &Settings) {
     std::thread::spawn(move || {
         if is_mac() {
             let _ = quiet(Command::new("afplay").arg("-v").arg(format!("{vol:.2}")).arg(&path));
+        } else if cfg!(windows) {
+            play_windows(&path);
         } else {
             play_linux(&path);
         }
     });
+}
+
+/// Windows: системный проигрыватель WAV через PowerShell (громкость системная, `volume` не действует).
+fn play_windows(path: &Path) {
+    let script =
+        format!("(New-Object Media.SoundPlayer {}).PlaySync()", crate::winsh::ps_quote(&path.to_string_lossy()));
+    safety::trace("звук: powershell SoundPlayer");
+    let _ = safety::run_quiet(&mut powershell(&script), Duration::from_secs(10));
+}
+
+/// Команда `powershell` без окна и профиля, выполняющая `script`.
+fn powershell(script: &str) -> Command {
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
+    crate::ipc::hide_window(&mut cmd);
+    cmd
+}
+
+/// Windows: всплывающая подсказка у значка в области уведомлений (живёт несколько секунд).
+fn send_windows(title: &str, body: &str) {
+    let t = crate::winsh::ps_quote(&safety::clean_text(title, 60));
+    let b = crate::winsh::ps_quote(&safety::clean_text(body, 200));
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
+         $n = New-Object System.Windows.Forms.NotifyIcon; \
+         $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; \
+         $n.ShowBalloonTip(8000, {t}, {b}, [System.Windows.Forms.ToolTipIcon]::None); \
+         Start-Sleep -Seconds 9; $n.Dispose()"
+    );
+    safety::trace("уведомление: powershell NotifyIcon");
+    let res = safety::run_quiet(&mut powershell(&script), Duration::from_secs(20));
+    safety::trace(&format!("уведомление: powershell завершён: {res:?}"));
 }
 
 /// Linux: `paplay`, при его отсутствии или ошибке — `aplay`. Каждая команда ограничена по времени.
@@ -340,6 +374,8 @@ fn send(title: &str, body: &str) {
         if !send_via_helper(title, body) {
             send_via_osascript(title, body);
         }
+    } else if cfg!(windows) {
+        send_windows(title, body);
     } else {
         send_linux(title, body);
     }
@@ -389,6 +425,9 @@ pub fn preview(s: &Settings) {
 pub fn status_line() -> String {
     if safety::is_safe() {
         return "безопасный режим (--safe или RADAR_SAFE): звук и всплывающие уведомления отключены".into();
+    }
+    if cfg!(windows) {
+        return "PowerShell: звук (WAV) и всплывающие подсказки".into();
     }
     if !is_mac() {
         let has = |c: &str| {
@@ -453,6 +492,10 @@ pub fn self_test(s: &Settings) {
     if is_mac() {
         println!("Если уведомление не появилось: Системные настройки → Уведомления → «Radar» → разрешить.");
         println!("(при первом показе macOS может спросить разрешение — нажмите «Разрешить»)");
+    } else if cfg!(windows) {
+        println!(
+            "Если уведомление не появилось: проверьте «Параметры → Система → Уведомления» и режим «Не беспокоить»."
+        );
     } else {
         println!("Если уведомление не появилось: установите libnotify-bin (sudo apt install libnotify-bin)");
         println!("и проверьте, что в окружении есть сеанс рабочего стола (DBUS_SESSION_BUS_ADDRESS).");

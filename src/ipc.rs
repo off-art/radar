@@ -57,6 +57,16 @@ pub fn detach(cmd: &mut Command) {
     }
 }
 
+/// Не показывать окно консоли у запускаемой вспомогательной программы (на unix ничего не делает).
+pub fn hide_window(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 /// Подсматривает первый байт входящих данных, не забирая его из потока.
 pub fn peek_byte(stream: &UnixStream) -> std::io::Result<u8> {
     let mut buf = [0u8; 1];
