@@ -49,7 +49,7 @@
 | # | Фича | Размер | Заметки |
 |---|---|---|---|
 | 15 | ✅ Homebrew: tap `off-art/homebrew-radar` (`brew install off-art/radar/radar`) | S | Сделано в v0.6.9–0.6.10. Формула на готовых бинарниках релиза, обновление из CI (job `homebrew`, SSH deploy-ключ `TAP_DEPLOY_KEY`), `radar update` под brew подсказывает `brew upgrade off-art/radar/radar` (короткое `radar` в brew — это cask из homebrew/cask). homebrew-core — позже, когда будет аудитория |
-| 16 | Нативный Windows | L | В работе (ветка `feature/windows`, PR #15): сокеты через `uds_windows`, запуск через PowerShell, поиск агентов по PATH/PATHEXT, звук и уведомления, `install.ps1`, `radar update`, сборка `x86_64-pc-windows-msvc` в релизе. Проверено на Windows 11 с OpenCode; Claude Code и остальные агенты — предстоит |
+| 16 | ✅ Нативный Windows | L | Выпущено в v0.7.0 (предварительная поддержка): сокеты через `uds_windows`, запуск через PowerShell, поиск агентов по PATH/PATHEXT, звук и всплывающие уведомления, `install.ps1`, `radar update`, сборка `x86_64-pc-windows-msvc` в релизе. Проверено на Windows 11 с OpenCode и Claude Code; остальные агенты (Codex, Qwen Code, GigaCode, Gemini CLI) — не проверены. `radar update` на Windows ещё не проверен на реальном обновлении |
 | 17 | ✅ Пакет `.deb` (amd64, arm64) в релизах | S | Собирается в CI из готового бинарника (`cargo-deb`), ссылка `releases/latest/download/radar_<arch>.deb`; `radar update` для установки из `/usr/` подсказывает команды |
 | 18 | `cargo install` / crates.io | S | Имя `radar` на crates.io занято другим проектом (0.1.0): нужно другое имя пакета (например `radar-tui`, бинарник остаётся `radar`) |
 
