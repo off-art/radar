@@ -172,6 +172,8 @@ pub struct App {
     pub divider_drag: bool,
     git: crate::git::Watcher,
     pub dirty: bool,
+    /// Где должен стоять курсор терминала после отрисовки кадра (Windows; задаёт `ui::draw`).
+    pub cursor: std::cell::Cell<Option<(u16, u16)>>,
     pub started: Instant,
     pub start_dir: PathBuf,
     /// Какие агенты установлены (None — ещё проверяется). Заполняется фоновыми потоками.
@@ -238,6 +240,7 @@ impl App {
             divider_drag: false,
             git: crate::git::Watcher::start(tx.clone()),
             dirty: true,
+            cursor: std::cell::Cell::new(None),
             started: Instant::now(),
             start_dir,
             available: Arc::new(Mutex::new(vec![])),

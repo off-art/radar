@@ -144,10 +144,8 @@ pub(super) fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         f.render_widget(Paragraph::new(msg).style(Style::default().fg(th.on_color).bg(th.dim)), r);
     }
 
-    // курсор — только у активной панели. Пока агент работает, он постоянно перерисовывает экран, и курсор
-    // «прыгает» между точками вывода (на Windows это хорошо заметно), поэтому на это время его прячем.
-    let working = cfg!(windows) && matches!(s.status, Status::Working);
-    if focused && matches!(app.mode, Mode::Normal) && s.is_running() && s.scroll == 0 && !working {
+    // курсор — только у активной панели
+    if focused && matches!(app.mode, Mode::Normal) && s.is_running() && s.scroll == 0 {
         let p = s.parser.lock_or_recover();
         let screen = p.screen();
         if !screen.hide_cursor() {
@@ -155,13 +153,9 @@ pub(super) fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
             if r < pane.inner.height && c < pane.inner.width {
                 let pos = Position::new(pane.inner.x + c, pane.inner.y + r);
                 if cfg!(windows) {
-                    // Аппаратный курсор Windows Terminal «ездит» по ячейкам при каждой перерисовке и сбивает
-                    // мигание, поэтому здесь он скрыт, а курсор рисуется ячейкой в обратных цветах.
-                    if let Some(cell) = f.buffer_mut().cell_mut(pos) {
-                        if !cell.modifier.contains(Modifier::REVERSED) {
-                            cell.modifier.insert(Modifier::REVERSED);
-                        }
-                    }
+                    // На Windows курсором управляет главный цикл: ставит его только при реальных изменениях кадра,
+                    // иначе Windows Terminal каждый раз сбрасывает мигание.
+                    app.cursor.set(Some((pos.x, pos.y)));
                 } else {
                     f.set_cursor_position(pos);
                 }
