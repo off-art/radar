@@ -33,8 +33,8 @@ jobs:
         with:
           files: radar-${{ matrix.target }}.tar.gz
 
-  # Обновляет формулу в tap off-art/homebrew-radar. Нужен секрет TAP_GITHUB_TOKEN
-  # (fine-grained PAT с правом Contents: write на репозиторий homebrew-radar).
+  # Обновляет формулу в tap off-art/homebrew-radar. Нужен секрет TAP_DEPLOY_KEY:
+  # приватная часть SSH deploy-ключа с правом записи, добавленного в репозиторий homebrew-radar.
   homebrew:
     needs: build
     runs-on: ubuntu-latest
@@ -42,7 +42,7 @@ jobs:
     steps:
       - name: Обновить формулу
         env:
-          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -51,7 +51,12 @@ jobs:
           sha() { curl -fsSL "$BASE/radar-$1.tar.gz" | sha256sum | cut -d' ' -f1; }
           A_MAC=$(sha aarch64-apple-darwin);  X_MAC=$(sha x86_64-apple-darwin)
           A_LIN=$(sha aarch64-unknown-linux-gnu); X_LIN=$(sha x86_64-unknown-linux-gnu)
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/off-art/homebrew-radar.git" tap
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/tap_key -o IdentitiesOnly=yes"
+          git clone git@github.com:off-art/homebrew-radar.git tap
           cd tap
           python3 - "$VER" "$BASE" "$A_MAC" "$X_MAC" "$A_LIN" "$X_LIN" <<'PY'
           import re, sys
