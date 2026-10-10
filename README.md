@@ -10,7 +10,7 @@
 
 [![Release](https://img.shields.io/github/v/release/off-art/radar?color=orange)](https://github.com/off-art/radar/releases/latest)
 [![CI](https://github.com/off-art/radar/actions/workflows/ci.yml/badge.svg)](https://github.com/off-art/radar/actions/workflows/ci.yml)
-![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux-lightgrey)
+![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Русский · [English](README.en.md)
@@ -20,12 +20,12 @@
 </div>
 
 Claude Code, Codex, OpenCode, Qwen Code, GigaCode, Gemini CLI и обычный shell живут в одном окне:
-слева список со статусами, справа живой терминал выбранного агента. Один бинарник на Rust, без зависимостей.
+слева список со статусами, справа живой терминал выбранного агента. Один бинарник на Rust, без зависимостей. Работает на **macOS, Linux и Windows**.
 
 ## Почему Radar
 
 - **Статусы в реальном времени** — `работает` · `ждёт ответа` · `готов`. Для Claude Code и Qwen Code точно, через хуки.
-- **Уведомления**, когда агент закончил или ждёт вас (macOS и Linux), со звуком.
+- **Уведомления**, когда агент закончил или ждёт вас (macOS, Linux и Windows), со звуком.
 - **Git на виду** — ветка и `+12 −3` у каждого агента, просмотр diff, commit / push / merge без выхода из Radar.
 - **Агенты живут в фоне** — закрыли окно, задачи продолжаются; `radar` подключается обратно.
 - **Ответ на запрос разрешения из списка** — `Ctrl+b y`, не заходя в агента, и всегда с текстом запроса.

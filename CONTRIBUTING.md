@@ -35,7 +35,7 @@ cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test   # то ж
 2. Код + юнит-тесты + проверка в tmux на демо-агентах.
 3. Фича доступна **и мышью, и клавишей, и из палитры**; новые клавиши — через `Action` и `[keys]`.
 4. Обновить README и `docs/` (оба языка), справку `?`, палитру и пример `config.toml`.
-5. Релиз: поднять `version` в `Cargo.toml`, обновить скриншоты в `docs/`, тег `vX.Y.Z` (один тег собирает macOS и Linux).
+5. Релиз: поднять `version` в `Cargo.toml`, обновить скриншоты в `docs/`, тег `vX.Y.Z` (один тег собирает macOS, Linux и Windows).
 
 Планы — в [ROADMAP.md](ROADMAP.md).
 
