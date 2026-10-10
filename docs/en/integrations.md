@@ -60,3 +60,9 @@ Sound uses custom soft chimes: one for "done", a slightly lower one for "needs c
 - Notifications can be muted per agent: right click → "Mute agent notifications" (a `⊘` icon appears in the list).
 
 Check with **`radar notify-test`**: it creates the helper, plays both sounds and shows a test notification.
+
+### If notifications cause problems (Linux)
+
+- **`radar --safe`** (or `RADAR_SAFE=1 radar`) is safe mode: no sound and no popups. Everything else works as usual.
+- On Linux notifications are rate-limited (at most one per 2 seconds, identical ones are not repeated for 15 seconds), the text is stripped of control characters and markup, and `notify-send`, `paplay` and `aplay` run with a timeout.
+- **`RADAR_TRACE=1 radar`** writes a log to `~/.config/radar/trace.log` (each line is flushed to disk immediately). If something crashes, send us this file.

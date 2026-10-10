@@ -17,6 +17,7 @@ mod menu;
 mod notify;
 mod paths;
 mod persist;
+mod safety;
 mod session;
 mod status;
 mod sync;
@@ -44,6 +45,9 @@ Radar — несколько AI-агентов в одном окне терми
   radar integration [install|uninstall <агент>|all]
                              точные статусы агентов через хуки (или экран «Интеграции»)
   radar --help | --version
+
+Безопасный режим: radar --safe (или RADAR_SAFE=1) — без звука и всплывающих уведомлений.
+Трассировка для разбора сбоев: RADAR_TRACE=1 radar → ~/.config/radar/trace.log
 
 Примеры:
   radar                      пустой список, агентов добавлять клавишей n
@@ -119,7 +123,12 @@ fn integration_cmd(args: &[String]) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // --safe: без звука и всплывающих уведомлений (на случай проблем с окружением рабочего стола)
+    let safe_flag = args.iter().any(|a| a == "--safe");
+    args.retain(|a| a != "--safe");
+    safety::set_safe(safe_flag || safety::safe_from_env());
+    safety::trace(&format!("запуск radar {} аргументы={:?}", env!("CARGO_PKG_VERSION"), args));
     match args.first().map(String::as_str) {
         Some("hook") => {
             hook::run_client(args.get(1).map_or("", String::as_str));

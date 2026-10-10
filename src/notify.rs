@@ -7,8 +7,10 @@
 //! Linux (для разработки): `notify-send` и `paplay`/`aplay`.
 
 use crate::paths::config_dir;
+use crate::safety;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 const ICON: &[u8] = include_bytes!("../assets/icon.icns");
 /// Исходник иконки 1024×1024: на macOS из него штатные `sips` и `iconutil` собирают .icns
@@ -131,15 +133,35 @@ pub fn play(kind: Sound, s: &Settings) {
     if !s.sound {
         return;
     }
+    if safety::is_safe() {
+        safety::trace("звук пропущен: безопасный режим");
+        return;
+    }
+    if !is_mac() && !safety::sound_allowed() {
+        safety::trace("звук пропущен: слишком часто");
+        return;
+    }
     let Some(path) = sound_file(kind, s) else { return };
     let vol = s.volume.clamp(0.0, 1.0);
     std::thread::spawn(move || {
         if is_mac() {
             let _ = quiet(Command::new("afplay").arg("-v").arg(format!("{vol:.2}")).arg(&path));
-        } else if quiet(Command::new("paplay").arg(&path)).is_err() {
-            let _ = quiet(Command::new("aplay").arg("-q").arg(&path));
+        } else {
+            play_linux(&path);
         }
     });
+}
+
+/// Linux: `paplay`, при его отсутствии или ошибке — `aplay`. Каждая команда ограничена по времени.
+fn play_linux(path: &Path) {
+    let limit = Duration::from_secs(10);
+    safety::trace("звук: paplay");
+    let ok = safety::run_quiet(Command::new("paplay").arg(path), limit).is_ok_and(|st| st.is_some_and(|s| s.success()));
+    if !ok {
+        safety::trace("звук: aplay");
+        let _ = safety::run_quiet(Command::new("aplay").arg("-q").arg(path), limit);
+    }
+    safety::trace("звук: готово");
 }
 
 // ───────────── помощник Radar.app ─────────────
@@ -319,14 +341,34 @@ fn send(title: &str, body: &str) {
             send_via_osascript(title, body);
         }
     } else {
-        let _ = quiet(Command::new("notify-send").arg(title).arg(body));
+        send_linux(title, body);
     }
+}
+
+/// Linux: `notify-send` с чистым текстом, без разметки и с таймаутом. Строка в стиле `-x` не примется за флаг.
+fn send_linux(title: &str, body: &str) {
+    let t = safety::escape_markup(&safety::clean_text(title, 80));
+    let b = safety::escape_markup(&safety::clean_text(body, 200));
+    safety::trace(&format!("уведомление: notify-send «{t}» / «{b}»"));
+    let res = safety::run_quiet(
+        Command::new("notify-send").args(["-a", "Radar", "-t", "8000", "--"]).arg(&t).arg(&b),
+        Duration::from_secs(5),
+    );
+    safety::trace(&format!("уведомление: notify-send завершён: {res:?}"));
 }
 
 /// Уведомление + мягкий звук (каждое можно выключить отдельно). Не блокирует интерфейс.
 pub fn notify(kind: Sound, title: &str, body: &str, s: &Settings) {
     play(kind, s);
     if s.popups {
+        if safety::is_safe() {
+            safety::trace("уведомление пропущено: безопасный режим");
+            return;
+        }
+        if !is_mac() && !safety::popup_allowed(&format!("{title}\n{body}")) {
+            safety::trace("уведомление пропущено: слишком часто или повтор");
+            return;
+        }
         let (t, b) = (title.to_string(), body.to_string());
         std::thread::spawn(move || send(&t, &b));
     }
@@ -345,6 +387,9 @@ pub fn preview(s: &Settings) {
 
 /// Для `radar doctor`: в каком состоянии уведомления.
 pub fn status_line() -> String {
+    if safety::is_safe() {
+        return "безопасный режим (--safe или RADAR_SAFE): звук и всплывающие уведомления отключены".into();
+    }
     if !is_mac() {
         let has = |c: &str| {
             Command::new("sh")
@@ -364,7 +409,12 @@ pub fn status_line() -> String {
         } else {
             "звук: нет paplay/aplay (sudo apt install pulseaudio-utils)"
         };
-        return format!("{n}; {a}");
+        let tr = if safety::trace_enabled() {
+            format!("; трассировка включена ({})", safety::trace_path().display())
+        } else {
+            String::new()
+        };
+        return format!("{n}; {a}{tr}");
     }
     if app_ready() {
         format!("Radar.app готов ({})", app_path().display())
@@ -376,6 +426,10 @@ pub fn status_line() -> String {
 /// `radar notify-test`: пошаговая проверка уведомлений.
 pub fn self_test(s: &Settings) {
     println!("Проверка уведомлений Radar");
+    if safety::is_safe() {
+        println!("  включён безопасный режим (--safe или RADAR_SAFE): звук и уведомления отключены, проверять нечего.");
+        return;
+    }
     if is_mac() {
         print!("  создаю помощник Radar.app … ");
         match build_helper() {
