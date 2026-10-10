@@ -109,7 +109,7 @@ pub fn run_update(check_only: bool) -> Result<()> {
     let exe: PathBuf = std::env::current_exe()?.canonicalize()?;
     if is_brew_install(&exe) {
         println!("Radar установлен через Homebrew — обновите так:");
-        println!("  brew update && brew upgrade radar");
+        println!("  brew update && brew upgrade off-art/radar/radar");
         return Ok(());
     }
     let t = target()?;

@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bas
 
 Or with Homebrew (macOS and Linux): `brew install off-art/radar/radar`.
 
-No Rust, no admin rights. Update with `radar update` (for a brew install: `brew upgrade radar`).
+No Rust, no admin rights. Update with `radar update` (for a brew install: `brew upgrade off-art/radar/radar`).
 Manual install, Linux and uninstall: [docs/en/install.md](docs/en/install.md).
 
 ## Quick start

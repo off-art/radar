@@ -17,10 +17,10 @@ curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bas
 
 ```sh
 brew install off-art/radar/radar
-brew upgrade radar   # обновление
+brew upgrade off-art/radar/radar   # обновление
 ```
 
-Работает на macOS и в Linuxbrew. `radar update` для такой установки подскажет команду `brew upgrade radar`.
+Работает на macOS и в Linuxbrew. `radar update` для такой установки подскажет команду `brew upgrade off-art/radar/radar`.
 
 ## Способ 3 — архив вручную
 
