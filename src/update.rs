@@ -33,7 +33,26 @@ fn target() -> Result<&'static str> {
         ("macos", "x86_64") => Ok("x86_64-apple-darwin"),
         ("linux", "x86_64") => Ok("x86_64-unknown-linux-gnu"),
         ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
-        (os, arch) => bail!("обновление поддерживается на macOS и Linux (у вас {os}/{arch})"),
+        ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),
+        (os, arch) => bail!("обновление поддерживается на macOS, Linux и Windows x64 (у вас {os}/{arch})"),
+    }
+}
+
+/// Имя файла релиза: на Windows — zip, на остальных системах — tar.gz.
+pub fn asset_name(target: &str) -> String {
+    if target.contains("windows") {
+        format!("radar-{target}.zip")
+    } else {
+        format!("radar-{target}.tar.gz")
+    }
+}
+
+/// Имя исполняемого файла внутри архива.
+fn exe_name() -> &'static str {
+    if cfg!(windows) {
+        "radar.exe"
+    } else {
+        "radar"
     }
 }
 
@@ -63,6 +82,24 @@ pub fn latest_version() -> Result<String> {
         bail!("не удалось связаться с GitHub — проверьте интернет");
     }
     parse_tag(&String::from_utf8_lossy(&out.stdout)).context("на GitHub пока нет опубликованных релизов")
+}
+
+/// Распаковывает архив релиза в `dest`: на Windows — штатным `Expand-Archive` (zip), иначе `tar xzf`.
+fn extract(archive: &Path, dest: &Path) -> Result<()> {
+    if cfg!(windows) {
+        // пути вставляются в сам скрипт: аргументы после -Command к скрипту не передаются
+        let script = format!(
+            "Expand-Archive -LiteralPath {} -DestinationPath {} -Force",
+            crate::winsh::ps_quote(&archive.to_string_lossy()),
+            crate::winsh::ps_quote(&dest.to_string_lossy())
+        );
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &script]);
+        crate::ipc::hide_window(&mut cmd);
+        run(&mut cmd, "распаковать архив")
+    } else {
+        run(Command::new("tar").arg("xzf").arg(archive).arg("-C").arg(dest), "распаковать архив")
+    }
 }
 
 fn run(cmd: &mut Command, what: &str) -> Result<()> {
@@ -129,17 +166,18 @@ pub fn run_update(check_only: bool) -> Result<()> {
     let tmp = std::env::temp_dir().join(format!("radar-update-{}", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
     let result = (|| -> Result<()> {
-        let tgz = tmp.join("radar.tar.gz");
+        let asset = asset_name(t);
+        let archive = tmp.join(&asset);
         println!("Скачиваю…");
         run(
             Command::new("curl")
                 .args(["-fsSL", "-o"])
-                .arg(&tgz)
-                .arg(format!("https://github.com/{}/releases/download/v{latest}/radar-{t}.tar.gz", repo())),
+                .arg(&archive)
+                .arg(format!("https://github.com/{}/releases/download/v{latest}/{asset}", repo())),
             "скачать архив релиза",
         )?;
-        run(Command::new("tar").arg("xzf").arg(&tgz).arg("-C").arg(&tmp), "распаковать архив")?;
-        let new = tmp.join("radar");
+        extract(&archive, &tmp)?;
+        let new = tmp.join(exe_name());
         let ver = Command::new(&new).arg("--version").output().context("новый файл не запускается")?;
         if !String::from_utf8_lossy(&ver.stdout).contains(&latest) {
             bail!("в архиве не та версия — обновление отменено");
@@ -160,6 +198,13 @@ mod tests {
     fn tag_parsing() {
         assert_eq!(parse_tag("https://github.com/off-art/radar/releases/tag/v0.3.1\n"), Some("0.3.1".into()));
         assert_eq!(parse_tag("https://github.com/off-art/radar/releases"), None);
+    }
+
+    #[test]
+    fn asset_names() {
+        assert_eq!(asset_name("x86_64-pc-windows-msvc"), "radar-x86_64-pc-windows-msvc.zip");
+        assert_eq!(asset_name("aarch64-apple-darwin"), "radar-aarch64-apple-darwin.tar.gz");
+        assert_eq!(asset_name("x86_64-unknown-linux-gnu"), "radar-x86_64-unknown-linux-gnu.tar.gz");
     }
 
     #[test]

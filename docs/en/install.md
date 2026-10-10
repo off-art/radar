@@ -2,7 +2,7 @@
 
 [← README](../../README.en.md) · [Русский](../ru/install.md)
 
-No Rust, no admin rights needed. Supported: macOS (Apple Silicon and Intel) and Linux (`x86_64`, `aarch64`).
+No Rust, no admin rights needed. Supported: macOS (Apple Silicon and Intel), Linux (`x86_64`, `aarch64`) and Windows 10/11 x64 (preview).
 
 ## Method 1: one command (recommended)
 
@@ -80,6 +80,21 @@ Notifications and sound need `libnotify-bin` (`notify-send`) and `pulseaudio-uti
 `sudo apt install libnotify-bin pulseaudio-utils`. Mouse copy goes to the system clipboard via `wl-copy` (Wayland) or
 `xclip`/`xsel` (X11) if installed, otherwise via OSC 52 (your terminal must support it).
 From source: `sudo apt install build-essential curl git`, then Rust and `./install.sh`.
+
+## Windows 10/11 (preview)
+
+In PowerShell, no admin rights needed:
+
+```powershell
+irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
+```
+
+The script puts `radar.exe` into `%LOCALAPPDATA%\radar` and adds the folder to `PATH` (visible in new PowerShell windows). Run Radar in Windows Terminal. Pre-release builds: set `$env:RADAR_VERSION = 'v0.7.0-win.1'` before the command above.
+
+- Agents start through PowerShell (`pwsh`, or the built-in `powershell` if it is missing) and are found on `PATH`, including npm `.cmd` wrappers.
+- Sound uses the system WAV player; notifications are balloon tips from the tray icon.
+- Update: `radar update`. Uninstall: delete `%LOCALAPPDATA%\radar` and the config `%USERPROFILE%\.config\radar`.
+- Windows support is a preview: the main flows are verified with OpenCode, other agents are still being checked.
 
 ## After installing
 
