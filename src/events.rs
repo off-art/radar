@@ -66,10 +66,8 @@ impl Log {
 
 /// «ЧЧ:ММ:СС» местного времени (без внешних зависимостей).
 pub fn now_hms() -> String {
-    let t = unsafe { libc::time(std::ptr::null_mut()) };
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&t, &mut tm) };
-    format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
+    let (h, m, s) = crate::ipc::local_hms();
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 /// «4:12» или «1:02:03» из длительности в секундах.

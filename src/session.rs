@@ -1,12 +1,12 @@
 //! Сессия агента: pty + эмулятор терминала + конечный автомат статусов.
 
 use crate::config::{AgentDef, Kind};
+use crate::ipc::UnixStream;
 use crate::status::{self, Signals, Status};
 use crate::sync::MutexExt;
 use anyhow::{Context, Result};
 use ratatui::style::Color;
 use std::io::Write;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
@@ -144,16 +144,10 @@ pub fn find_binaries(bins: &[&str]) -> Vec<Option<String>> {
         // «имя<TAB>путь» на каждую команду; пусто, если не найдена
         let script =
             format!("for b in {}; do printf '%s\\t%s\\n' \"$b\" \"$(command -v \"$b\")\"; done", list.join(" "));
-        use std::os::unix::process::CommandExt;
         let mut cmd = std::process::Command::new(default_shell());
         // Интерактивный шелл без своей сессии захватывает терминал Radar (tcsetpgrp) — и Radar
         // получает SIGTTOU («suspended (tty output)»). setsid отрезает его от управляющего терминала.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
+        crate::ipc::detach(&mut cmd);
         cmd.args(["-l", "-i", "-c", &script])
             .env("SHELL_SESSIONS_DISABLE", "1")
             .env_remove("TERM_SESSION_ID")

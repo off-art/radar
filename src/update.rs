@@ -81,8 +81,7 @@ fn replace(exe: &Path, new: &Path) -> Result<()> {
     std::fs::rename(exe, &old).with_context(|| format!("нет прав на запись в {}", exe.display()))?;
     let put = || -> Result<()> {
         std::fs::copy(new, exe)?;
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(exe, std::fs::Permissions::from_mode(0o755))?;
+        crate::ipc::make_executable(exe)?;
         if cfg!(target_os = "macos") {
             let _ = Command::new("codesign").args(["--force", "--sign", "-"]).arg(exe).output();
             let _ = Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(exe).output();

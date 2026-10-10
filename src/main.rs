@@ -12,6 +12,7 @@ mod hook;
 mod host;
 mod input;
 mod integrations;
+mod ipc;
 mod keys;
 mod menu;
 mod notify;

@@ -4,12 +4,12 @@
 //! `{"ctl": "<команда>", ...}` и читает JSON-ответ `{"ok": true, ...}` или `{"ok": false, "error": "..."}`.
 //! Ожидание (`wait`) делается на стороне клиента опросом `status`, поэтому интерфейс Radar не блокируется.
 
+use crate::ipc::UnixStream;
 use crate::status::Status;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
