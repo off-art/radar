@@ -39,7 +39,13 @@ Also: a grid of up to 9 agents, groups, git worktree isolation, an event log, 12
 curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash
 ```
 
-Or with Homebrew (macOS and Linux): `brew install off-art/radar/radar`.
+Or with Homebrew (macOS and Linux):
+
+```sh
+brew install off-art/radar/radar
+```
+
+> Use the full name. The short `brew install radar` installs a different app (a menu-bar Radar from homebrew-cask).
 
 No Rust, no admin rights. Update with `radar update` (for a brew install: `brew upgrade off-art/radar/radar`).
 Manual install, Linux and uninstall: [docs/en/install.md](docs/en/install.md).

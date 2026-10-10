@@ -229,7 +229,7 @@
   .note kbd { font: 600 12.5px var(--mono); background: var(--bg3); border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; }
 
   /* установка */
-  .inst { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .inst { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
   @media (max-width: 900px) { .inst { grid-template-columns: 1fr; } }
   .inst .card { gap: 12px; }
   .inst .term-snip { position: relative; padding-right: 76px; }
@@ -317,6 +317,10 @@
     <div class="cmd rv" style="--d:.24s">
       <code>curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash</code>
       <button type="button" class="copy-btn"><span data-l="ru">Копировать</span><span data-l="en">Copy</span></button>
+    </div>
+    <div class="cmd rv" style="--d:.27s; margin-top: 10px">
+      <code>brew install off-art/radar/radar</code>
+      <button type="button" class="copy-btn" data-copy="brew install off-art/radar/radar"><span data-l="ru">Копировать</span><span data-l="en">Copy</span></button>
     </div>
 
     <div class="stage rv" style="--d:.3s" id="demo">
@@ -429,12 +433,17 @@
   <div class="wrap">
     <div class="lbl rv"><span data-l="ru">Установка</span><span data-l="en">Install</span></div>
     <h2 class="rv"><span data-l="ru">Одна команда. <em>Одна минута.</em></span><span data-l="en">One command. <em>One minute.</em></span></h2>
-    <p class="sub rv"><span data-l="ru">macOS (Apple Silicon и Intel) и Linux (x86_64, aarch64). Скрипт кладёт бинарник в <code class="mono">~/.local/bin</code>.</span><span data-l="en">macOS (Apple Silicon and Intel) and Linux (x86_64, aarch64). The script puts the binary in <code class="mono">~/.local/bin</code>.</span></p>
+    <p class="sub rv"><span data-l="ru">macOS (Apple Silicon и Intel) и Linux (x86_64, aarch64). Через скрипт или Homebrew.</span><span data-l="en">macOS (Apple Silicon and Intel) and Linux (x86_64, aarch64). Via script or Homebrew.</span></p>
     <div class="inst">
       <div class="card rv">
         <h3><span data-l="ru">Скрипт</span><span data-l="en">Script</span></h3>
         <div class="term-snip"><span class="s">$</span> curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash<button type="button" class="copy copy-btn" data-copy="curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bash"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
-        <p><span data-l="ru">Берёт последний релиз под вашу систему.</span><span data-l="en">Takes the latest release for your system.</span></p>
+        <p><span data-l="ru">Берёт последний релиз под вашу систему и кладёт бинарник в <code class="mono">~/.local/bin</code>.</span><span data-l="en">Takes the latest release for your system and puts the binary in <code class="mono">~/.local/bin</code>.</span></p>
+      </div>
+      <div class="card rv" style="--d:.04s">
+        <h3>Homebrew</h3>
+        <div class="term-snip"><span class="s">$</span> brew install off-art/radar/radar<button type="button" class="copy copy-btn" data-copy="brew install off-art/radar/radar"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
+        <p><span data-l="ru">macOS и Linux (Linuxbrew). Имя полностью: короткое <code class="mono">brew install radar</code> ставит другое приложение.</span><span data-l="en">macOS and Linux (Linuxbrew). Use the full name: plain <code class="mono">brew install radar</code> installs a different app.</span></p>
       </div>
       <div class="card rv" style="--d:.08s">
         <h3><span data-l="ru">Из исходников</span><span data-l="en">From source</span></h3>
@@ -444,7 +453,9 @@
       </div>
       <div class="card rv" style="--d:.16s">
         <h3><span data-l="ru">Обновление</span><span data-l="en">Updating</span></h3>
-        <div class="term-snip"><span class="s">$</span> radar update<button type="button" class="copy copy-btn" data-copy="radar update"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
+        <div class="term-snip"><span class="s">$</span> radar update<button type="button" class="copy copy-btn" data-copy="radar update"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button>
+<span class="c"># <span data-l="ru">если ставили через brew</span><span data-l="en">if installed with brew</span></span>
+<span class="s">$</span> brew upgrade off-art/radar/radar</div>
         <p><span data-l="ru">Агенты в фоне продолжают работать.</span><span data-l="en">Background agents keep running.</span></p>
       </div>
     </div>
