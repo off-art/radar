@@ -30,6 +30,68 @@ fn install_panic_hook() {
     }));
 }
 
+/// Состояние курсора терминала между кадрами (Windows).
+#[derive(Default)]
+struct CursorState {
+    shown: bool,
+    pos: Option<(u16, u16)>,
+    last: Option<ratatui::buffer::Buffer>,
+}
+
+/// Отрисовка кадра для Windows Terminal. `Terminal::draw` на каждом кадре заново прячет, показывает и переставляет
+/// курсор, а Windows Terminal при этом сбрасывает мигание — курсор «дрожит» и мелькает у спиннеров. Здесь курсор
+/// трогается только при реальных изменениях: прячется перед записью изменённых ячеек и возвращается на место после.
+/// Если кадр не изменился, в терминал не уходит ничего, и курсор мигает как обычно.
+fn draw_windows(terminal: &mut ratatui::DefaultTerminal, app: &App, cur: &mut CursorState) -> Result<()> {
+    use crossterm::cursor::{Hide, MoveTo, Show};
+    use ratatui::backend::Backend;
+    use std::io::Write;
+
+    terminal.autoresize()?;
+    app.cursor.set(None);
+    {
+        let mut frame = terminal.get_frame();
+        ui::draw(&mut frame, app);
+    }
+    let buf = terminal.current_buffer_mut().clone();
+    let changed = cur.last.as_ref() != Some(&buf);
+    let want = app.cursor.get();
+    let mut out = std::io::stdout();
+    if changed && cur.shown {
+        let _ = execute!(out, crossterm::terminal::BeginSynchronizedUpdate, Hide);
+        cur.shown = false;
+    } else if changed {
+        let _ = execute!(out, crossterm::terminal::BeginSynchronizedUpdate);
+    }
+    terminal.flush()?;
+    terminal.swap_buffers();
+    Backend::flush(terminal.backend_mut())?;
+    match want {
+        Some((x, y)) => {
+            if changed || cur.pos != want || !cur.shown {
+                let _ = execute!(out, MoveTo(x, y));
+            }
+            if !cur.shown {
+                let _ = execute!(out, Show);
+                cur.shown = true;
+            }
+        }
+        None => {
+            if cur.shown {
+                let _ = execute!(out, Hide);
+                cur.shown = false;
+            }
+        }
+    }
+    if changed {
+        let _ = execute!(out, crossterm::terminal::EndSynchronizedUpdate);
+    }
+    let _ = out.flush();
+    cur.pos = want;
+    cur.last = Some(buf);
+    Ok(())
+}
+
 /// Главный цикл.
 pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
     let mut terminal = ratatui::init();
@@ -47,6 +109,7 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
         let mut last_tick = Instant::now();
         let mut last_input = Instant::now();
         let mut last_draw = Instant::now() - Duration::from_secs(1);
+        let mut cur = CursorState::default();
         loop {
             // Занят — быстрый опрос; в простое реже: меньше пробуждений процессора.
             let busy = app.dirty || app.needs_animation() || last_input.elapsed() < Duration::from_millis(500);
@@ -76,7 +139,11 @@ pub fn run(mut app: App, rx: Receiver<Msg>, sock: PathBuf) -> Result<()> {
             if due {
                 let size = terminal.size()?;
                 app.compute_layout(Rect::new(0, 0, size.width, size.height));
-                terminal.draw(|f| ui::draw(f, &app))?;
+                if cfg!(windows) {
+                    draw_windows(&mut terminal, &app, &mut cur)?;
+                } else {
+                    terminal.draw(|f| ui::draw(f, &app))?;
+                }
                 app.dirty = false;
                 last_draw = Instant::now();
             }

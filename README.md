@@ -47,6 +47,12 @@ brew install off-art/radar/radar
 
 > Имя нужно писать полностью. Короткое `brew install radar` установит другое приложение (Radar для строки меню из homebrew-cask).
 
+Windows 10/11 (x64, предварительная поддержка) — в PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
+```
+
 Debian, Ubuntu, Linux Mint, СберОС — пакет `.deb`: [docs/ru/install.md](docs/ru/install.md#пакет-deb-debian-ubuntu-linux-mint-сберос).
 
 Ни Rust, ни прав администратора не нужно. Обновление: `radar update` (для установки через brew — `brew upgrade off-art/radar/radar`).

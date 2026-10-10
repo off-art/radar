@@ -4,13 +4,12 @@
 //! `radar hook <Событие>`. Эта команда читает JSON из stdin и передаёт его
 //! запущенному интерфейсу через unix-сокет.
 
+use crate::ipc::{UnixListener, UnixStream};
 use crate::paths::config_dir;
 use crate::session::{shq, Msg};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -24,7 +23,7 @@ pub fn socket_path() -> PathBuf {
 pub fn start_server(path: &PathBuf, tx: Sender<Msg>) -> Result<()> {
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    crate::ipc::restrict_to_owner(path);
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let tx = tx.clone();

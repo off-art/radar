@@ -216,6 +216,7 @@ mod tests {
         assert_eq!(escape_markup("-x"), "-x");
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_quiet_waits_and_kills() {
         let ok = run_quiet(&mut Command::new("true"), Duration::from_secs(5)).unwrap();

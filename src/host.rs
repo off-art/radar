@@ -9,13 +9,13 @@
 //! `Q` завершить агента и хозяина (можно без `A` — так работает `radar stop`).
 //! События хуков агент шлёт хозяину «голым» JSON (первый байт `{`), хозяин пересылает их окну кадром `H`.
 
+use crate::ipc::{UnixListener, UnixStream};
 use crate::paths::run_dir;
 use crate::sync::MutexExt;
 use anyhow::{anyhow, bail, Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -146,10 +146,7 @@ pub fn run_host() -> Result<()> {
     }
     let _ = std::fs::remove_file(&spec.sock);
     let listener = UnixListener::bind(&spec.sock)?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&spec.sock, std::fs::Permissions::from_mode(0o600));
-    }
+    crate::ipc::restrict_to_owner(&spec.sock);
 
     let sh = Arc::new(Shared {
         client: Mutex::new(None),
@@ -232,11 +229,8 @@ fn serve(
     let mut stream = stream;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     // «голый» JSON от `radar hook`: первый байт `{`
-    let mut first = [0u8; 1];
-    if (&stream).peek_byte(&mut first).is_err() {
-        return;
-    }
-    if first[0] == b'{' {
+    let Ok(first) = crate::ipc::peek_byte(&stream) else { return };
+    if first == b'{' {
         let mut s = String::new();
         let _ = (&stream).take(1 << 20).read_to_string(&mut s);
         if let Some(c) = sh.client.lock_or_recover().as_mut() {
@@ -310,22 +304,6 @@ fn serve(
     *client = None;
 }
 
-trait PeekByte {
-    fn peek_byte(&self, buf: &mut [u8; 1]) -> std::io::Result<()>;
-}
-
-impl PeekByte for &UnixStream {
-    fn peek_byte(&self, buf: &mut [u8; 1]) -> std::io::Result<()> {
-        use std::os::fd::AsRawFd;
-        let n = unsafe { libc::recv(self.as_raw_fd(), buf.as_mut_ptr() as *mut _, 1, libc::MSG_PEEK) };
-        if n == 1 {
-            Ok(())
-        } else {
-            Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "пусто"))
-        }
-    }
-}
-
 /// Отвечает на запросы терминалу (DA, DSR), на которые агенты иногда ждут ответ.
 fn answer_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>, parser: &Mutex<vt100::Parser>) {
     let contains = |needle: &[u8]| data.windows(needle.len()).any(|w| w == needle);
@@ -355,7 +333,6 @@ fn answer_queries(data: &[u8], writer: &Arc<Mutex<Box<dyn Write + Send>>>, parse
 
 /// Запускает хозяина отдельным процессом (без терминала, переживёт закрытие окна) и ждёт, пока появится сокет.
 pub fn launch(spec: &Spec) -> Result<()> {
-    use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe()?;
     let logs = run_dir();
     std::fs::create_dir_all(&logs)?;
@@ -366,12 +343,7 @@ pub fn launch(spec: &Spec) -> Result<()> {
         Some(f) => cmd.stderr(f),
         None => cmd.stderr(std::process::Stdio::null()),
     };
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
+    crate::ipc::detach(&mut cmd);
     let mut child = cmd.spawn().context("не удалось запустить фонового хозяина агента")?;
     child.stdin.take().ok_or_else(|| anyhow!("нет stdin"))?.write_all(serde_json::to_string(spec)?.as_bytes())?;
     let start = Instant::now();

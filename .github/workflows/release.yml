@@ -43,16 +43,38 @@ jobs:
           done
       - uses: softprops/action-gh-release@v2
         with:
+          # теги вида v0.7.0-win.1 — пробные: помечаются pre-release и не становятся «latest»
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             radar-${{ matrix.target }}.tar.gz
             target/deb/*.deb
+
+  # Windows (x86_64): zip с radar.exe. Отдельная задача, чтобы не влиять на сборки macOS и Linux.
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: cargo build --release --locked --target x86_64-pc-windows-msvc
+      - name: Pack
+        shell: pwsh
+        run: |
+          .\target\x86_64-pc-windows-msvc\release\radar.exe --version
+          Compress-Archive -Path target\x86_64-pc-windows-msvc\release\radar.exe -DestinationPath radar-x86_64-pc-windows-msvc.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: radar-x86_64-pc-windows-msvc.zip
 
   # Обновляет формулу в tap off-art/homebrew-radar. Нужен секрет TAP_DEPLOY_KEY:
   # приватная часть SSH deploy-ключа с правом записи, добавленного в репозиторий homebrew-radar.
   homebrew:
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ vars.HOMEBREW_TAP_ENABLED == 'true' }}
+    # пробные теги (с «-») формулу brew не обновляют
+    if: ${{ vars.HOMEBREW_TAP_ENABLED == 'true' && !contains(github.ref_name, '-') }}
     steps:
       - name: Обновить формулу
         env:

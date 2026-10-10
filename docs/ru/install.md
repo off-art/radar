@@ -2,7 +2,7 @@
 
 [← README](../../README.md) · [English](../en/install.md)
 
-Не нужны ни Rust, ни права администратора. Поддерживаются macOS (Apple Silicon и Intel) и Linux (`x86_64`, `aarch64`).
+Не нужны ни Rust, ни права администратора. Поддерживаются macOS (Apple Silicon и Intel), Linux (`x86_64`, `aarch64`) и Windows 10/11 x64 (предварительно).
 
 ## Способ 1 — одной командой (рекомендуется)
 
@@ -80,6 +80,21 @@ mkdir -p ~/.local/bin && rm -f ~/.local/bin/radar && mv radar ~/.local/bin/
 `sudo apt install libnotify-bin pulseaudio-utils`. Копирование мышью идёт в системный буфер через `wl-copy` (Wayland) или
 `xclip`/`xsel` (X11), если они установлены, иначе через OSC 52 (терминал должен его поддерживать).
 Из исходников: `sudo apt install build-essential curl git`, затем Rust и `./install.sh`.
+
+## Windows 10/11 (предварительная поддержка)
+
+В PowerShell, права администратора не нужны:
+
+```powershell
+irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex
+```
+
+Скрипт кладёт `radar.exe` в `%LOCALAPPDATA%\radar` и добавляет папку в `PATH` (в новых окнах PowerShell). Запускайте Radar в Windows Terminal. Пробные выпуски ставятся так: `$env:RADAR_VERSION = 'v0.7.0-win.1'` перед командой выше.
+
+- Агенты запускаются через PowerShell (`pwsh`, а если его нет — встроенный `powershell`) и ищутся по `PATH`, включая npm-обёртки `.cmd`.
+- Звук проигрывается системным плеером WAV, уведомления — всплывающие подсказки у значка в трее.
+- Обновление: `radar update`. Удаление: удалите папку `%LOCALAPPDATA%\radar` и конфиг `%USERPROFILE%\.config\radar`.
+- Windows пока в предварительной поддержке: основные сценарии проверены с OpenCode, остальные агенты — в процессе.
 
 ## После установки
 

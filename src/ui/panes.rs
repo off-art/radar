@@ -151,7 +151,14 @@ pub(super) fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         if !screen.hide_cursor() {
             let (r, c) = screen.cursor_position();
             if r < pane.inner.height && c < pane.inner.width {
-                f.set_cursor_position(Position::new(pane.inner.x + c, pane.inner.y + r));
+                let pos = Position::new(pane.inner.x + c, pane.inner.y + r);
+                if cfg!(windows) {
+                    // На Windows курсором управляет главный цикл: ставит его только при реальных изменениях кадра,
+                    // иначе Windows Terminal каждый раз сбрасывает мигание.
+                    app.cursor.set(Some((pos.x, pos.y)));
+                } else {
+                    f.set_cursor_position(pos);
+                }
             }
         }
     }

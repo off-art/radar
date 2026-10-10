@@ -12,6 +12,7 @@ mod hook;
 mod host;
 mod input;
 mod integrations;
+mod ipc;
 mod keys;
 mod menu;
 mod notify;
@@ -27,6 +28,8 @@ mod textfield;
 mod theme;
 mod ui;
 mod update;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod winsh;
 
 use anyhow::Result;
 use std::path::PathBuf;
