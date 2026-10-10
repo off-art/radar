@@ -358,7 +358,7 @@
       </div>
       <div class="card c3 rv">
         <h3><span data-l="ru">Уведомления</span><span data-l="en">Notifications</span></h3>
-        <p><span data-l="ru">Системное уведомление и мягкий звук, когда агент закончил или ждёт вас. macOS и Linux.</span><span data-l="en">A system notification and a soft chime when an agent finishes or needs you. macOS and Linux.</span></p>
+        <p><span data-l="ru">Системное уведомление и мягкий звук, когда агент закончил или ждёт вас. macOS, Linux и Windows.</span><span data-l="en">A system notification and a soft chime when an agent finishes or needs you. macOS, Linux and Windows.</span></p>
         <div class="vis"><div class="mtoast"><img src="brand/favicon-180.png" alt=""><div><b><span data-l="ru">Задача выполнена</span><span data-l="en">Task completed</span></b><small>Claude Code · radar</small></div></div></div>
       </div>
 
@@ -433,7 +433,7 @@
   <div class="wrap">
     <div class="lbl rv"><span data-l="ru">Установка</span><span data-l="en">Install</span></div>
     <h2 class="rv"><span data-l="ru">Одна команда. <em>Одна минута.</em></span><span data-l="en">One command. <em>One minute.</em></span></h2>
-    <p class="sub rv"><span data-l="ru">macOS (Apple Silicon и Intel) и Linux (x86_64, aarch64). Через скрипт или Homebrew.</span><span data-l="en">macOS (Apple Silicon and Intel) and Linux (x86_64, aarch64). Via script or Homebrew.</span></p>
+    <p class="sub rv"><span data-l="ru">macOS (Apple Silicon и Intel), Linux (x86_64, aarch64) и Windows 10/11 (x64). Через скрипт или Homebrew.</span><span data-l="en">macOS (Apple Silicon and Intel), Linux (x86_64, aarch64) and Windows 10/11 (x64). Via script or Homebrew.</span></p>
     <div class="inst">
       <div class="card rv">
         <h3><span data-l="ru">Скрипт</span><span data-l="en">Script</span></h3>
@@ -451,7 +451,12 @@
 <span class="s">$</span> cd radar &amp;&amp; ./install.sh<button type="button" class="copy copy-btn" data-copy="git clone https://github.com/off-art/radar && cd radar && ./install.sh"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
         <p><span data-l="ru">Нужен Rust. Первая сборка около двух минут.</span><span data-l="en">Needs Rust. The first build takes about two minutes.</span></p>
       </div>
-      <div class="card rv" style="--d:.16s">
+      <div class="card rv" style="--d:.12s">
+        <h3>Windows</h3>
+        <div class="term-snip"><span class="s">PS&gt;</span> irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex<button type="button" class="copy copy-btn" data-copy="irm https://raw.githubusercontent.com/off-art/radar/main/install.ps1 | iex"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button></div>
+        <p><span data-l="ru">Windows 10/11 (x64), в PowerShell. Предварительная поддержка: <code class="mono">radar.exe</code> ставится в <code class="mono">%LOCALAPPDATA%\radar</code>.</span><span data-l="en">Windows 10/11 (x64), in PowerShell. Preview support: <code class="mono">radar.exe</code> goes to <code class="mono">%LOCALAPPDATA%\radar</code>.</span></p>
+      </div>
+      <div class="card rv" style="--d:.16s;grid-column:1/-1">
         <h3><span data-l="ru">Обновление</span><span data-l="en">Updating</span></h3>
         <div class="term-snip"><span class="s">$</span> radar update<button type="button" class="copy copy-btn" data-copy="radar update"><span data-l="ru">Копия</span><span data-l="en">Copy</span></button>
 <span class="c"># <span data-l="ru">если ставили через brew</span><span data-l="en">if installed with brew</span></span>
@@ -469,13 +474,13 @@
     <h2 class="rv"><span data-l="ru">Короткий README, <em>подробные разделы</em></span><span data-l="en">A short README, <em>detailed guides</em></span></h2>
     <p class="sub rv"><span data-l="ru">Всё на русском и английском.</span><span data-l="en">Everything in Russian and English.</span></p>
     <div class="docs rv">
-      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/install.md"><div><b>Установка</b><small>macOS, Linux, обновление</small></div><i>→</i></a>
+      <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/install.md"><div><b>Установка</b><small>macOS, Linux, Windows, обновление</small></div><i>→</i></a>
       <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/usage.md"><div><b>Работа в интерфейсе</b><small>клавиши, мышь, группы</small></div><i>→</i></a>
       <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/git.md"><div><b>Git</b><small>diff, commit, разрешения</small></div><i>→</i></a>
       <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/automation.md"><div><b>Автоматизация</b><small>radar ctl, фон</small></div><i>→</i></a>
       <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/integrations.md"><div><b>Статусы и уведомления</b><small>хуки, интеграции</small></div><i>→</i></a>
       <a data-l="ru" href="https://github.com/off-art/radar/blob/main/docs/ru/config.md"><div><b>Настройки</b><small>config.toml, темы</small></div><i>→</i></a>
-      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/install.md"><div><b>Install</b><small>macOS, Linux, updating</small></div><i>→</i></a>
+      <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/install.md"><div><b>Install</b><small>macOS, Linux, Windows, updating</small></div><i>→</i></a>
       <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/usage.md"><div><b>Using the UI</b><small>keys, mouse, groups</small></div><i>→</i></a>
       <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/git.md"><div><b>Git</b><small>diff, commit, approvals</small></div><i>→</i></a>
       <a data-l="en" href="https://github.com/off-art/radar/blob/main/docs/en/automation.md"><div><b>Automation</b><small>radar ctl, background</small></div><i>→</i></a>

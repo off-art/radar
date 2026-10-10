@@ -10,7 +10,7 @@ See who is working, who is done, and who needs your answer.
 
 [![Release](https://img.shields.io/github/v/release/off-art/radar?color=orange)](https://github.com/off-art/radar/releases/latest)
 [![CI](https://github.com/off-art/radar/actions/workflows/ci.yml/badge.svg)](https://github.com/off-art/radar/actions/workflows/ci.yml)
-![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux-lightgrey)
+![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [Русский](README.md) · English
@@ -20,12 +20,12 @@ See who is working, who is done, and who needs your answer.
 </div>
 
 Claude Code, Codex, OpenCode, Qwen Code, GigaCode, Gemini CLI and a plain shell live in one window:
-a status list on the left, the live terminal of the selected agent on the right. A single Rust binary, no dependencies.
+a status list on the left, the live terminal of the selected agent on the right. A single Rust binary, no dependencies. Runs on **macOS, Linux and Windows**.
 
 ## Why Radar
 
 - **Real-time statuses**: `working` · `waiting` · `ready`. Exact for Claude Code and Qwen Code, via hooks.
-- **Notifications** when an agent finishes or needs you (macOS and Linux), with sound.
+- **Notifications** when an agent finishes or needs you (macOS, Linux and Windows), with sound.
 - **Git at a glance**: branch and `+12 −3` per agent, diff viewer, commit / push / merge without leaving Radar.
 - **Agents keep running in the background**: close the window, tasks continue; `radar` reattaches.
 - **Answer permission prompts from the list**: `Ctrl+b y`, without entering the agent, always showing the request text.

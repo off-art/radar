@@ -71,7 +71,7 @@ Tokens: `accent`, `panel_bg`, `sidebar_bg`, `header_bg`, `active_row_bg`, `text`
 - GigaCode, Codex, Gemini CLI and OpenCode integrations follow their documentation and are not verified on real agents.
 - Status heuristics for non-Claude agents can be wrong on unusual wording.
 - Automatic light/dark theme switching by system appearance is not supported.
-- There is no native Windows build; in WSL2 Radar runs as the Linux version.
+- Windows: preview support (checked on Windows 11 with OpenCode and Claude Code); other agents have not been tried there. Statuses work as on the other systems.
 - Linux is verified on Debian 13 (aarch64, container); real SberOS (x86_64) has not been tested yet.
 - Scrollback accumulated before a window was closed is not kept when reattaching.
 - macOS-dependent tests (notifications, `codesign`) run only in CI.
