@@ -32,3 +32,40 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: radar-${{ matrix.target }}.tar.gz
+
+  # Обновляет формулу в tap off-art/homebrew-radar. Нужен секрет TAP_GITHUB_TOKEN
+  # (fine-grained PAT с правом Contents: write на репозиторий homebrew-radar).
+  homebrew:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ vars.HOMEBREW_TAP_ENABLED == 'true' }}
+    steps:
+      - name: Обновить формулу
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VER="${TAG#v}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          sha() { curl -fsSL "$BASE/radar-$1.tar.gz" | sha256sum | cut -d' ' -f1; }
+          A_MAC=$(sha aarch64-apple-darwin);  X_MAC=$(sha x86_64-apple-darwin)
+          A_LIN=$(sha aarch64-unknown-linux-gnu); X_LIN=$(sha x86_64-unknown-linux-gnu)
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/off-art/homebrew-radar.git" tap
+          cd tap
+          python3 - "$VER" "$BASE" "$A_MAC" "$X_MAC" "$A_LIN" "$X_LIN" <<'PY'
+          import re, sys
+          ver, base, a_mac, x_mac, a_lin, x_lin = sys.argv[1:]
+          s = open("Formula/radar.rb", encoding="utf-8").read()
+          s = re.sub(r'version "[^"]+"', f'version "{ver}"', s)
+          for target, h in [("aarch64-apple-darwin", a_mac), ("x86_64-apple-darwin", x_mac),
+                            ("aarch64-unknown-linux-gnu", a_lin), ("x86_64-unknown-linux-gnu", x_lin)]:
+              s = re.sub(
+                  r'url "[^"]*radar-%s\.tar\.gz"\n(\s*)sha256 "[0-9a-f]+"' % re.escape(target),
+                  lambda m: f'url "{base}/radar-{target}.tar.gz"\n{m.group(1)}sha256 "{h}"', s)
+          open("Formula/radar.rb", "w", encoding="utf-8").write(s)
+          PY
+          git config user.name "radar-release-bot"
+          git config user.email "noreply@github.com"
+          git commit -am "radar ${VER}"
+          git push

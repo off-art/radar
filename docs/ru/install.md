@@ -2,7 +2,7 @@
 
 [← README](../../README.md) · [English](../en/install.md)
 
-Не нужны ни brew, ни Rust, ни права администратора. Поддерживаются macOS (Apple Silicon и Intel) и Linux (`x86_64`, `aarch64`).
+Не нужны ни Rust, ни права администратора. Поддерживаются macOS (Apple Silicon и Intel) и Linux (`x86_64`, `aarch64`).
 
 ## Способ 1 — одной командой (рекомендуется)
 
@@ -13,7 +13,16 @@ curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bas
 Скрипт скачивает готовый бинарник под ваш процессор в `~/.local/bin` и подсказывает, что добавить в `PATH`.
 Файл, скачанный через `curl`, карантином macOS не помечается.
 
-## Способ 2 — архив вручную
+## Способ 2 — Homebrew
+
+```sh
+brew install off-art/radar/radar
+brew upgrade radar   # обновление
+```
+
+Работает на macOS и в Linuxbrew. `radar update` для такой установки подскажет команду `brew upgrade radar`.
+
+## Способ 3 — архив вручную
 
 1. На странице [Releases](https://github.com/off-art/radar/releases/latest) скачайте архив: `radar-aarch64-apple-darwin.tar.gz`
    (Apple Silicon: M1/M2/M3…) или `radar-x86_64-apple-darwin.tar.gz` (Intel). Процессор: `uname -m` (`arm64` — Apple Silicon, `x86_64` — Intel).
@@ -32,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/off-art/radar/main/install.sh | bas
 Без `xattr` macOS пишет, что не может проверить разработчика: тогда *Системные настройки → Конфиденциальность и безопасность → «Всё равно открыть»*.
 Такой же архив можно переслать коллеге в мессенджере.
 
-## Способ 3 — из исходников
+## Способ 4 — из исходников
 
 Нужен Rust. Без brew он ставится так:
 

@@ -37,6 +37,12 @@ fn target() -> Result<&'static str> {
     }
 }
 
+/// Бинарник поставлен через Homebrew (лежит в Cellar, в том числе Linuxbrew)?
+/// Тогда версией управляет brew, и самообновление его сломает.
+pub fn is_brew_install(exe: &Path) -> bool {
+    exe.components().any(|c| c.as_os_str() == "Cellar")
+}
+
 fn repo() -> String {
     std::env::var("RADAR_REPO").unwrap_or_else(|_| REPO.to_string())
 }
@@ -100,8 +106,13 @@ pub fn run_update(check_only: bool) -> Result<()> {
         println!("Обновить: radar update");
         return Ok(());
     }
-    let t = target()?;
     let exe: PathBuf = std::env::current_exe()?.canonicalize()?;
+    if is_brew_install(&exe) {
+        println!("Radar установлен через Homebrew — обновите так:");
+        println!("  brew update && brew upgrade radar");
+        return Ok(());
+    }
+    let t = target()?;
     let tmp = std::env::temp_dir().join(format!("radar-update-{}", std::process::id()));
     std::fs::create_dir_all(&tmp)?;
     let result = (|| -> Result<()> {
@@ -136,6 +147,13 @@ mod tests {
     fn tag_parsing() {
         assert_eq!(parse_tag("https://github.com/off-art/radar/releases/tag/v0.3.1\n"), Some("0.3.1".into()));
         assert_eq!(parse_tag("https://github.com/off-art/radar/releases"), None);
+    }
+
+    #[test]
+    fn brew_detection() {
+        assert!(is_brew_install(Path::new("/opt/homebrew/Cellar/radar/0.6.8/bin/radar")));
+        assert!(is_brew_install(Path::new("/home/linuxbrew/.linuxbrew/Cellar/radar/0.6.8/bin/radar")));
+        assert!(!is_brew_install(Path::new("/Users/a/.local/bin/radar")));
     }
 
     #[test]
