@@ -224,7 +224,11 @@ fn send_windows(title: &str, body: &str, silent: bool) {
     if let Ok(e) = std::fs::read_to_string(&err) {
         safety::trace(&format!("уведомление: ошибка тоста: {}", e.trim()));
     }
-    let _ = std::fs::remove_file(&file);
+    if safety::trace_enabled() {
+        safety::trace(&format!("уведомление: скрипт сохранён: {}", file.display()));
+    } else {
+        let _ = std::fs::remove_file(&file);
+    }
 }
 
 /// Linux: `paplay`, при его отсутствии или ошибке — `aplay`. Каждая команда ограничена по времени.
