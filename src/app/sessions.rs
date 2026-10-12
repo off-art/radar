@@ -47,6 +47,7 @@ impl App {
             name = format!("{base} #{n}");
             n += 1;
         }
+        self.auto_integration(&def);
         let id = self.next_id;
         self.next_id += 1;
         let s = Session::spawn(id, &def, name, cwd, wt, self.pane_size(), self.tx.clone(), &self.ctx, resume)?;
@@ -194,6 +195,7 @@ impl App {
         };
         let (cwd, name, wt, muted) = (old.cwd.clone(), old.name.clone(), old.worktree.clone(), old.muted);
         let resume = old.resume_id.clone();
+        self.auto_integration(&def);
         let id = self.next_id;
         self.next_id += 1;
         match Session::spawn(id, &def, name, cwd, wt, self.pane_size(), self.tx.clone(), &self.ctx, resume.as_deref()) {
@@ -205,6 +207,20 @@ impl App {
             Err(e) => self.toast(format!("Не удалось перезапустить: {e}")),
         }
         self.dirty = true;
+    }
+
+    /// Перед запуском агента включает его интеграцию (хуки → точные статусы), если её нет или путь к radar устарел.
+    fn auto_integration(&mut self, def: &AgentDef) {
+        use crate::integrations::{self as ig, Auto};
+        if !self.cfg.auto_integrations {
+            return;
+        }
+        match ig::ensure(&ig::key(&def.command)) {
+            Auto::Skipped => {}
+            Auto::Enabled => self.toast(format!("{}: включены точные статусы (интеграция Radar)", def.name)),
+            Auto::Repaired => self.toast(format!("{}: интеграция обновлена под текущий radar", def.name)),
+            Auto::Failed(e) => self.toast(format!("{}: интеграцию не включить — {e}", def.name)),
+        }
     }
 
     pub(super) fn close(&mut self, idx: usize) {

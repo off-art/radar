@@ -165,11 +165,69 @@ fn state_in(id: &str, home: &Path) -> State {
 
 pub fn install(id: &str) -> Result<PathBuf> {
     let exe = std::env::current_exe().context("не удалось определить путь к radar")?;
-    install_in(id, &crate::paths::home(), &exe.to_string_lossy())
+    let path = install_in(id, &crate::paths::home(), &exe.to_string_lossy())?;
+    set_opt_out(&crate::paths::config_dir(), id, false);
+    Ok(path)
 }
 
 pub fn uninstall(id: &str) -> Result<()> {
-    uninstall_in(id, &crate::paths::home())
+    uninstall_in(id, &crate::paths::home())?;
+    // выключили сами — автоматика больше не включает
+    set_opt_out(&crate::paths::config_dir(), id, true);
+    Ok(())
+}
+
+/// Результат автоматического включения интеграции при запуске агента.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Auto {
+    /// Ничего не менялось (уже включена, выключена пользователем или интеграции нет).
+    Skipped,
+    Enabled,
+    /// Хуки вели на несуществующий radar — переписаны.
+    Repaired,
+    Failed(String),
+}
+
+/// Включает интеграцию агента сама: пользователю не нужно знать про `radar integration install`.
+/// Не трогает то, что пользователь выключил явно (`radar integration uninstall`).
+pub fn ensure(id: &str) -> Auto {
+    let Ok(exe) = std::env::current_exe() else { return Auto::Skipped };
+    ensure_in(id, &crate::paths::home(), &crate::paths::config_dir(), &exe.to_string_lossy())
+}
+
+fn ensure_in(id: &str, home: &Path, cfg_dir: &Path, exe: &str) -> Auto {
+    if id == "claude" || spec(id).is_none() || opted_out(cfg_dir, id) {
+        return Auto::Skipped;
+    }
+    let repaired = match state_in(id, home) {
+        State::NotInstalled => false,
+        State::Installed if stale_exe_in(id, home).is_some() => true,
+        _ => return Auto::Skipped,
+    };
+    match install_in(id, home, exe) {
+        Ok(_) if repaired => Auto::Repaired,
+        Ok(_) => Auto::Enabled,
+        Err(e) => Auto::Failed(e.to_string()),
+    }
+}
+
+/// Файл со списком интеграций, выключенных пользователем вручную.
+fn opt_out_file(cfg_dir: &Path) -> PathBuf {
+    cfg_dir.join("integrations-off")
+}
+
+fn opted_out(cfg_dir: &Path, id: &str) -> bool {
+    std::fs::read_to_string(opt_out_file(cfg_dir)).is_ok_and(|t| t.lines().any(|l| l.trim() == id))
+}
+
+fn set_opt_out(cfg_dir: &Path, id: &str, off: bool) {
+    let text = std::fs::read_to_string(opt_out_file(cfg_dir)).unwrap_or_default();
+    let mut ids: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && *l != id).collect();
+    if off {
+        ids.push(id);
+    }
+    let _ = std::fs::create_dir_all(cfg_dir);
+    let _ = std::fs::write(opt_out_file(cfg_dir), ids.join("\n") + if ids.is_empty() { "" } else { "\n" });
 }
 
 fn install_in(id: &str, home: &Path, exe: &str) -> Result<PathBuf> {
@@ -344,6 +402,45 @@ mod tests {
 
     fn tmp(name: &str) -> TempDir {
         TempDir::new(&format!("int-{name}"))
+    }
+
+    #[test]
+    fn ensure_enables_repairs_and_respects_opt_out() {
+        let h = tmp("auto");
+        let cfg = h.join("cfg");
+        let real = h.join("radar");
+        std::fs::write(&real, "").unwrap();
+        let exe = real.to_string_lossy().into_owned();
+        // выключена → включаем сами
+        assert_eq!(ensure_in("gigacode", &h, &cfg, &exe), Auto::Enabled);
+        assert_eq!(state_in("gigacode", &h), State::Installed);
+        // уже включена и путь живой → не трогаем
+        assert_eq!(ensure_in("gigacode", &h, &cfg, &exe), Auto::Skipped);
+        // путь умер → чиним
+        install_in("gigacode", &h, "/нет/radar").unwrap();
+        assert_eq!(ensure_in("gigacode", &h, &cfg, &exe), Auto::Repaired);
+        assert_eq!(stale_exe_in("gigacode", &h), None);
+        // выключено руками → автоматика не возвращает
+        uninstall_in("gigacode", &h).unwrap();
+        set_opt_out(&cfg, "gigacode", true);
+        assert_eq!(ensure_in("gigacode", &h, &cfg, &exe), Auto::Skipped);
+        assert_eq!(state_in("gigacode", &h), State::NotInstalled);
+        // явная установка снимает запрет
+        set_opt_out(&cfg, "gigacode", false);
+        assert_eq!(ensure_in("gigacode", &h, &cfg, &exe), Auto::Enabled);
+        // Claude встроен, неизвестные агенты пропускаются
+        assert_eq!(ensure_in("claude", &h, &cfg, &exe), Auto::Skipped);
+        assert_eq!(ensure_in("unknown", &h, &cfg, &exe), Auto::Skipped);
+    }
+
+    #[test]
+    fn ensure_does_not_touch_broken_config() {
+        let h = tmp("auto-bad");
+        let p = h.join(".qwen/settings.json");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "{ // комментарий\n}").unwrap();
+        assert!(matches!(ensure_in("qwen", &h, &h.join("cfg"), "/x/radar"), Auto::Failed(_)));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{ // комментарий\n}");
     }
 
     #[test]

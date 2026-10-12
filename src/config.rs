@@ -81,6 +81,7 @@ struct RawKeys {
 #[derive(Deserialize, Default)]
 struct RawConfig {
     notifications: Option<bool>,
+    auto_integrations: Option<bool>,
     sound: Option<bool>,
     popups: Option<bool>,
     restore: Option<bool>,
@@ -104,6 +105,8 @@ pub const DEFAULT_SCROLLBACK: usize = 5000;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub notifications: bool,
+    /// Сам включать интеграции агентов (точные статусы через хуки) при запуске агента.
+    pub auto_integrations: bool,
     pub sound: bool,
     /// Всплывающие уведомления macOS (звук включается отдельно).
     pub popups: bool,
@@ -197,6 +200,7 @@ impl Config {
             sound: true,
             popups: true,
             restore: true,
+            auto_integrations: true,
             mouse_select: true,
             sound_theme: crate::notify::DEFAULT_THEME.to_string(),
             volume: 0.6,
@@ -227,6 +231,7 @@ impl Config {
         cfg.sound = raw.sound.unwrap_or(true);
         cfg.popups = raw.popups.unwrap_or(true);
         cfg.restore = raw.restore.unwrap_or(true);
+        cfg.auto_integrations = raw.auto_integrations.unwrap_or(true);
         cfg.mouse_select = raw.mouse_select.unwrap_or(true);
         if let Some(t) = raw.sound_theme {
             cfg.sound_theme = t;
@@ -373,6 +378,9 @@ sound = true
 popups = true
 # Восстанавливать список агентов при следующем запуске Radar
 restore = true
+# Сам включать интеграции агентов (точные статусы через хуки в их конфиге) при запуске агента.
+# Правки обратимы: `radar integration uninstall <агент>` выключает и больше не включается сам
+auto_integrations = true
 # Выделение текста мышью в окне агента (протянуть — скопировать). false — мышь целиком уходит агенту
 mouse_select = true
 # Звуковая тема: bell, sonar, retro, harp, knock, thump, drop (выбор также в палитре: Ctrl+b, p, «Звук»)

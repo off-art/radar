@@ -20,7 +20,9 @@
 
 ![Integrations](../integrations.png)
 
-For other agents exact statuses can be enabled via hooks. **Settings → Integrations tab** (`,` in navigation mode, then `Tab`;
+For other agents exact statuses work through hooks, and **Radar enables them itself**: when you launch an agent whose integration is off, it adds the hooks to that agent's config (a backup is made before the first edit, other settings are untouched) and shows a notice. If the hook path goes stale after a reinstall or move, it is repaired the same way. Turn the automation off with `auto_integrations = false` in `config.toml`. Anything you disabled by hand (`radar integration uninstall` or the toggle below) is not re-enabled automatically.
+
+**Settings → Integrations tab** (`,` in navigation mode, then `Tab`;
 or right click → "Agent integrations…"): `✓` enabled, `–` disabled, and the right side shows whether the agent is installed.
 `Enter`/`Space`/click toggles. The same from the terminal:
 
