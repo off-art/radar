@@ -15,6 +15,7 @@ use crate::sync::MutexExt;
 use anyhow::{anyhow, bail, Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -112,6 +113,8 @@ struct Shared {
     parser: Mutex<vt100::Parser>,
     meta: Mutex<Meta>,
     exit: Mutex<Option<i32>>,
+    /// Недавние хуки агента: пока окна нет, они иначе пропали бы, и новое окно не знало бы статус.
+    hooks: Mutex<HookHistory>,
 }
 
 /// Запуск хозяина: `radar host` (спецификация на stdin). Не возвращается, пока агент не будет закрыт.
@@ -153,6 +156,7 @@ pub fn run_host() -> Result<()> {
         parser: Mutex::new(vt100::Parser::new(rows, cols, 0)),
         meta: Mutex::new(spec.meta.clone()),
         exit: Mutex::new(None),
+        hooks: Mutex::new(HookHistory::default()),
     });
 
     // вывод агента: в эмулятор и окну
@@ -203,6 +207,77 @@ pub fn run_host() -> Result<()> {
     Ok(())
 }
 
+/// Сколько последних хуков хозяин помнит для нового окна.
+const HOOK_HISTORY: usize = 4;
+
+/// Последние хуки агента в сжатом виде (полный payload бывает огромным) и последний запрос пользователя.
+#[derive(Default)]
+struct HookHistory {
+    recent: VecDeque<serde_json::Value>,
+    prompt: Option<serde_json::Value>,
+}
+
+impl HookHistory {
+    fn remember(&mut self, raw: &serde_json::Value, now_ms: u64) {
+        let mut h = compact_hook(raw);
+        h["at"] = now_ms.into();
+        let has_prompt =
+            h["event"] == "UserPromptSubmit" && h["payload"]["prompt"].as_str().is_some_and(|p| !p.trim().is_empty());
+        if has_prompt {
+            self.prompt = Some(h.clone());
+        }
+        if self.recent.len() == HOOK_HISTORY {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(h);
+    }
+
+    /// Что отправить окну при подключении: подпись задачи, затем недавние события по порядку.
+    /// К каждому событию добавляется `age_ms`: сколько прошло с его прихода (окно по нему восстанавливает таймеры).
+    fn replay(&self, now_ms: u64) -> Vec<serde_json::Value> {
+        self.prompt
+            .iter()
+            .chain(self.recent.iter())
+            .map(|h| {
+                let mut h = h.clone();
+                let at = h["at"].as_u64().unwrap_or(now_ms);
+                h["age_ms"] = now_ms.saturating_sub(at).into();
+                h
+            })
+            .collect()
+    }
+}
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Оставляет в хуке только то, что читает `Session::apply_hook`, и помечает его как повтор.
+fn compact_hook(raw: &serde_json::Value) -> serde_json::Value {
+    use serde_json::{json, Map, Value};
+    let short = |v: &Value| match v.as_str() {
+        Some(t) => Value::String(t.chars().take(300).collect()),
+        None => v.clone(),
+    };
+    let pick = |from: &Value, keys: &[&str]| -> Map<String, Value> {
+        keys.iter().filter_map(|k| from.get(*k).map(|v| ((*k).to_string(), short(v)))).collect()
+    };
+    let payload = raw.get("payload").unwrap_or(&Value::Null);
+    let mut p = pick(payload, &["session_id", "prompt", "tool_name", "message", "notification_type"]);
+    if let Some(input) = payload.get("tool_input") {
+        p.insert(
+            "tool_input".into(),
+            Value::Object(pick(input, &["command", "file_path", "path", "url", "description"])),
+        );
+    }
+    json!({
+        "session": raw.get("session").cloned().unwrap_or(Value::Null),
+        "event": raw.get("event").cloned().unwrap_or(Value::Null),
+        "payload": p,
+        "replay": true,
+    })
+}
+
 /// Отключает окно, которое закрылось или не читает: агент продолжает работать, вывод больше не блокируется.
 /// Сокет закрывается явно — иначе окно осталось бы с оборванным кадром.
 fn drop_client(client: &mut Option<UnixStream>) {
@@ -233,7 +308,12 @@ fn serve(
     if first == b'{' {
         let mut s = String::new();
         let _ = (&stream).take(1 << 20).read_to_string(&mut s);
-        if let Some(c) = sh.client.lock_or_recover().as_mut() {
+        // под одной блокировкой с подключением окна: хук не потеряется и не продублируется
+        let mut client = sh.client.lock_or_recover();
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+            sh.hooks.lock_or_recover().remember(&v, unix_ms());
+        }
+        if let Some(c) = client.as_mut() {
             let _ = write_frame(c, b'H', s.as_bytes());
         }
         return;
@@ -260,6 +340,17 @@ fn serve(
             || write_frame(&mut out, b'O', &snapshot).is_err()
         {
             return;
+        }
+        // статус агента, пока окна не было: повторяем недавние хуки (окно не поднимает по ним уведомления)
+        let replay = sh.hooks.lock_or_recover().replay(unix_ms());
+        crate::hook::log_line(&format!("host-attach: хуков для повтора {}", replay.len()));
+        for h in replay {
+            crate::hook::log_line(&format!(
+                "host-replay event={} age_ms={}",
+                h["event"].as_str().unwrap_or("?"),
+                h["age_ms"]
+            ));
+            let _ = write_frame(&mut out, b'H', h.to_string().as_bytes());
         }
         if let Some(code) = *sh.exit.lock_or_recover() {
             let _ = write_frame(&mut out, b'X', &code.to_be_bytes());
@@ -437,5 +528,38 @@ mod tests {
         };
         let back: Meta = serde_json::from_slice(&serde_json::to_vec(&m).unwrap()).unwrap();
         assert_eq!(back, m);
+    }
+    #[test]
+    fn hook_history_keeps_recent_and_prompt() {
+        let ev = |e: &str, extra: serde_json::Value| serde_json::json!({"session": 4, "event": e, "payload": extra});
+        let mut h = HookHistory::default();
+        h.remember(&ev("UserPromptSubmit", serde_json::json!({"prompt": "почини тесты", "session_id": "s1"})), 1_000);
+        for i in 0..6 {
+            let big = serde_json::json!({"tool_name": "Bash", "tool_response": "x".repeat(5000)});
+            h.remember(&ev("PreToolUse", big), 2_000 + i * 1_000);
+        }
+        let r = h.replay(61_000);
+        // подпись + последние HOOK_HISTORY событий; запрос пользователя не вытеснен
+        assert_eq!(r.len(), 1 + HOOK_HISTORY);
+        assert_eq!(r[0]["payload"]["prompt"], "почини тесты");
+        // возраст события: таймер в новом окне идёт от настоящего начала задачи
+        assert_eq!(r[0]["age_ms"], 60_000);
+        assert_eq!(r[r.len() - 1]["age_ms"], 61_000 - 7_000);
+        assert!(r.iter().all(|x| x["replay"] == true));
+        // тяжёлые поля отброшены
+        assert!(r[1]["payload"].get("tool_response").is_none());
+    }
+
+    #[test]
+    fn compact_hook_keeps_what_apply_hook_reads() {
+        let raw = serde_json::json!({"session": 2, "event": "PermissionRequest", "payload": {
+            "tool_name": "run_shell_command",
+            "tool_input": {"command": "rm -rf build", "content": "лишнее"},
+            "transcript_path": "/x"}});
+        let h = compact_hook(&raw);
+        assert_eq!(h["event"], "PermissionRequest");
+        assert_eq!(h["payload"]["tool_input"]["command"], "rm -rf build");
+        assert!(h["payload"]["tool_input"].get("content").is_none());
+        assert!(h["payload"].get("transcript_path").is_none());
     }
 }

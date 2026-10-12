@@ -108,7 +108,8 @@ pub(super) fn draw_pane(f: &mut Frame, app: &App, pane: &PaneRect) {
         let title = Line::from(vec![
             Span::styled(format!(" {} ", icon(s, ms)), Style::default().fg(col).add_modifier(Modifier::BOLD)),
             Span::styled(format!("{} ", s.name), Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(format!("· {} {} ", s.status.label(), status_time(s)), Style::default().fg(col)),
+            Span::styled(format!("· {} ", s.status.label()), Style::default().fg(col)),
+            Span::styled(format!("{} ", status_time(s)).trim_start().to_string(), Style::default().fg(col)),
         ]);
         let block = Block::default()
             .borders(Borders::ALL)
@@ -174,7 +175,7 @@ pub(super) fn draw_header(buf: &mut Buffer, area: Rect, s: &Session, ms: u128, t
     let chip_text = match s.status {
         Status::Waiting => format!(" {} ждёт ответа {} ", icon(s, ms), status_time(s)),
         Status::Working => format!(" {} работает {} ", icon(s, ms), status_time(s)),
-        Status::Idle => format!(" {} готов · {} назад ", icon(s, ms), status_time(s)),
+        Status::Idle => format!(" {} готов ", icon(s, ms)),
         Status::Starting => format!(" {} запуск ", icon(s, ms)),
         Status::Exited => format!(" {} завершён ", icon(s, ms)),
     };

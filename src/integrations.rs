@@ -86,9 +86,55 @@ pub fn describe(id: &str) -> String {
     match id {
         "claude" => "встроено: хуки подключаются при каждом запуске".into(),
         _ => match target_path(id, &crate::paths::home()) {
-            Some(p) => p.to_string_lossy().replacen(&*crate::paths::home().to_string_lossy(), "~", 1),
+            Some(p) => {
+                let mut text = p.to_string_lossy().replacen(&*crate::paths::home().to_string_lossy(), "~", 1);
+                if let Some(exe) = stale_exe(id) {
+                    text.push_str(&format!(" · ⚠ {exe} не существует — radar integration install {id}"));
+                }
+                text
+            }
             None => "не поддерживается".into(),
         },
+    }
+}
+
+/// Путь к radar, записанный в установленной интеграции, если такого файла уже нет
+/// (после переезда на brew, переустановки или удаления бинарника хуки молча перестают работать).
+pub fn stale_exe(id: &str) -> Option<String> {
+    stale_exe_in(id, &crate::paths::home())
+}
+
+fn stale_exe_in(id: &str, home: &Path) -> Option<String> {
+    let sp = spec(id)?;
+    let text = std::fs::read_to_string(target_path(id, home)?).ok()?;
+    let exe = match sp.method {
+        Method::OpenCodePlugin => {
+            let rest = text.lines().find_map(|l| l.strip_prefix("const RADAR = "))?;
+            serde_json::from_str::<String>(rest.trim()).ok()?
+        }
+        Method::JsonHooks(_) => {
+            let v: Value = serde_json::from_str(&text).ok()?;
+            let cmd = v
+                .get("hooks")?
+                .as_object()?
+                .values()
+                .filter_map(|l| l.as_array())
+                .flatten()
+                .filter(|g| is_radar_group(g))
+                .find_map(|g| {
+                    g["hooks"].as_array()?.iter().find_map(|h| h.get("command")?.as_str().map(String::from))
+                })?;
+            first_word(&cmd)
+        }
+    };
+    (!Path::new(&exe).exists()).then_some(exe)
+}
+
+/// Первое слово команды; путь в одинарных кавычках (как пишет `shq`) читается целиком.
+fn first_word(cmd: &str) -> String {
+    match cmd.strip_prefix('\'') {
+        Some(rest) => rest.split('\'').next().unwrap_or("").to_string(),
+        None => cmd.split_whitespace().next().unwrap_or("").to_string(),
     }
 }
 
@@ -298,6 +344,22 @@ mod tests {
 
     fn tmp(name: &str) -> TempDir {
         TempDir::new(&format!("int-{name}"))
+    }
+
+    #[test]
+    fn stale_exe_is_reported_for_missing_binary() {
+        let h = tmp("stale");
+        let real = h.join("radar bin");
+        std::fs::write(&real, "").unwrap();
+        install_in("qwen", &h, &real.to_string_lossy()).unwrap();
+        assert_eq!(stale_exe_in("qwen", &h), None);
+        std::fs::remove_file(&real).unwrap();
+        assert_eq!(stale_exe_in("qwen", &h), Some(real.to_string_lossy().into_owned()));
+        // плагин OpenCode проверяется так же
+        install_in("opencode", &h, "/нет/такого/radar").unwrap();
+        assert_eq!(stale_exe_in("opencode", &h).as_deref(), Some("/нет/такого/radar"));
+        // не установлено — нечего проверять
+        assert_eq!(stale_exe_in("gemini", &h), None);
     }
 
     #[test]

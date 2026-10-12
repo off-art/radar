@@ -85,7 +85,8 @@ fn fmt_dur(secs: u64) -> String {
 fn status_time(s: &Session) -> String {
     match s.status {
         Status::Working => fmt_dur(s.work_started.unwrap_or(s.status_since).elapsed().as_secs()),
-        Status::Waiting | Status::Idle => fmt_dur(s.status_since.elapsed().as_secs()),
+        Status::Waiting => fmt_dur(s.status_since.elapsed().as_secs()),
+        // «готов» — конечное состояние: бегущий счётчик там только отвлекает (сколько работал — в журнале событий)
         _ => String::new(),
     }
 }

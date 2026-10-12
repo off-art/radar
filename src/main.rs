@@ -75,6 +75,11 @@ fn doctor() -> Result<()> {
         }
     }
     println!();
+    for id in integrations::installable() {
+        if let Some(exe) = integrations::stale_exe(id) {
+            println!("  ⚠ интеграция {id}: хуки ведут на несуществующий {exe} — radar integration install {id}");
+        }
+    }
     println!("  Уведомления: {}", notify::status_line());
     Ok(())
 }

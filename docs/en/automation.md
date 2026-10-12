@@ -10,7 +10,7 @@ Run `radar` again and the window reattaches with the same screen and state.
 
 - An agent ends when you close it (`Ctrl+b`, `x`), when it exits on its own, or with **`radar stop`**
   (stops all background agents). `Ctrl+b`, `Q` stops everything and quits.
-- Hooks and integrations keep working: events go through the agent process and reach the window after reattaching.
+- Hooks and integrations keep working: events go through the agent process. It remembers the latest hooks, so a reattached window immediately shows the previous status (`working`, `waiting`) instead of "starting".
 - One agent is shown in one window: a second Radar shows only its own agents and warns that the others are open elsewhere.
 - `radar ctl` drives the window; to see what runs in the background without a window, open `radar`.
 - On attach the visible screen is restored; scrollback accumulated before the window was closed is not kept.

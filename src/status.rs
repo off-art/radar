@@ -69,6 +69,7 @@ const WORKING: &[&str] = &[
     "esc to stop",
     "ctrl+c to stop",
     "(esc to cancel",
+    "esc to cancel)",
     "press esc to interrupt",
 ];
 
@@ -131,6 +132,14 @@ mod tests {
     #[test]
     fn working_hint_wins_over_silence() {
         let t = "✻ Thinking… (esc to interrupt)";
+        assert_eq!(decide(Status::Idle, &sig(t, 5000, true)), Status::Working);
+    }
+
+    #[test]
+    fn qwen_working_line_is_detected() {
+        let t = "⠋ Thinking… (esc to cancel, 12s)";
+        assert_eq!(decide(Status::Idle, &sig(t, 5000, true)), Status::Working);
+        let t = "⠋ Running tool (12s · esc to cancel)";
         assert_eq!(decide(Status::Idle, &sig(t, 5000, true)), Status::Working);
     }
 
