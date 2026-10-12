@@ -83,7 +83,9 @@ impl App {
                         unknown += 1;
                         continue; // агента убрали из конфига — не трогаем
                     };
-                    if let Ok(s) = Session::from_host(&def, meta, stream, self.tx.clone()) {
+                    if let Ok(mut s) = Session::from_host(&def, meta, stream, self.tx.clone()) {
+                        // агент уже давно запущен: «стартовый вывод» не ждём, иначе статус залипнет на «запуск»
+                        s.mark_reattached();
                         found.push(s);
                     }
                 }

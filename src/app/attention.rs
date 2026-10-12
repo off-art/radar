@@ -129,10 +129,26 @@ impl App {
             Msg::Ctl { req, reply } => {
                 let _ = reply.send(self.handle_ctl(&req));
             }
-            Msg::Hook { session, event, payload } => {
+            Msg::Hook { session, event, payload, replay } => {
                 if let Some(i) = self.sessions.iter().position(|s| s.id == session) {
-                    if let Some(a) = self.sessions[i].apply_hook(&event, &payload) {
-                        self.handle_attention(i, a);
+                    let attention = self.sessions[i].apply_hook(&event, &payload);
+                    match replay {
+                        // повтор от хозяина при подключении окна: статус и таймеры восстанавливаем, не уведомляя заново
+                        Some(age) => {
+                            self.sessions[i].backdate(age);
+                            let s = &self.sessions[i];
+                            crate::hook::log_line(&format!(
+                                "window-replay session={session} event={event} age_ms={} status={:?} таймер_с={}",
+                                age.as_millis(),
+                                s.status,
+                                s.work_started.map_or(0, |t| t.elapsed().as_secs())
+                            ));
+                        }
+                        None => {
+                            if let Some(a) = attention {
+                                self.handle_attention(i, a);
+                            }
+                        }
                     }
                     self.dirty = true;
                 }

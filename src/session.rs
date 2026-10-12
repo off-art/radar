@@ -33,6 +33,8 @@ pub enum Msg {
         session: u32,
         event: String,
         payload: serde_json::Value,
+        /// Повтор недавнего хука при подключении окна к работающему агенту: возраст события, без уведомлений.
+        replay: Option<Duration>,
     },
 }
 
@@ -347,6 +349,13 @@ impl Session {
                                     session: id,
                                     event: v.get("event").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                                     payload: v.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+                                    replay: v.get("replay").and_then(serde_json::Value::as_bool).unwrap_or(false).then(
+                                        || {
+                                            Duration::from_millis(
+                                                v.get("age_ms").and_then(serde_json::Value::as_u64).unwrap_or(0),
+                                            )
+                                        },
+                                    ),
                                 });
                             }
                         }
@@ -393,6 +402,22 @@ impl Session {
             conn,
             meta_sent: (meta.name, meta.resume_id, meta.muted),
         })
+    }
+
+    /// Повтор хука от хозяина: событие произошло `age` назад, поэтому статус и таймер «стартовали» тогда, а не сейчас.
+    pub fn backdate(&mut self, age: Duration) {
+        let Some(t) = Instant::now().checked_sub(age) else { return };
+        if t < self.status_since {
+            self.status_since = t;
+        }
+        if self.status == Status::Working && self.work_started.is_some_and(|w| t < w) {
+            self.work_started = Some(t);
+        }
+    }
+
+    /// Окно подключилось к уже работающему агенту: стартовая заставка давно позади.
+    pub fn mark_reattached(&mut self) {
+        self.submitted = true;
     }
 
     /// Сообщает хозяину об изменении имени, диалога Claude или признака «тишина».
@@ -880,5 +905,76 @@ mod clear_tests {
         }
         feed(&mut p, b"\x1b[3J");
         assert_eq!(history(&mut p), 0);
+    }
+}
+
+#[cfg(test)]
+mod reattach_tests {
+    use super::*;
+
+    fn def() -> AgentDef {
+        AgentDef {
+            id: "qwen".into(),
+            name: "Qwen Code".into(),
+            command: "qwen".into(),
+            args: vec![],
+            kind: Kind::Generic,
+            color: Color::Reset,
+            approve: vec![],
+        }
+    }
+
+    fn meta() -> crate::host::Meta {
+        crate::host::Meta {
+            id: 7,
+            name: "qwen".into(),
+            agent: "Qwen Code".into(),
+            cwd: PathBuf::from("/tmp"),
+            worktree: None,
+            rows: 24,
+            cols: 80,
+            resume_id: None,
+            muted: false,
+        }
+    }
+
+    /// Окно переоткрыто, пока агент работает: хозяин повторяет последний хук, и статус не залипает на «запуск».
+    #[test]
+    fn replayed_hook_restores_status_without_attention() {
+        let (client, mut host_side) = UnixStream::pair().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut s = Session::from_host(&def(), meta(), client, tx).unwrap();
+        s.mark_reattached();
+        assert_eq!(s.status, Status::Starting);
+
+        let hook = serde_json::json!({
+            "session": 7, "event": "PreToolUse", "replay": true, "age_ms": 90_000,
+            "payload": {"tool_name": "read_file"},
+        });
+        crate::host::write_frame(&mut host_side, b'H', hook.to_string().as_bytes()).unwrap();
+
+        let Msg::Hook { session, event, payload, replay } = rx.recv_timeout(Duration::from_secs(2)).unwrap() else {
+            panic!("ожидался хук");
+        };
+        assert_eq!((session, event.as_str(), replay), (7, "PreToolUse", Some(Duration::from_secs(90))));
+        s.apply_hook(&event, &payload);
+        s.backdate(replay.unwrap());
+        assert_eq!(s.status, Status::Working);
+        assert!(s.hooks_seen);
+        // таймер идёт от настоящего начала работы, а не от переоткрытия окна
+        assert!(s.work_started.unwrap().elapsed() >= Duration::from_secs(90));
+    }
+
+    #[test]
+    fn reattached_session_does_not_hold_starting() {
+        let mut s = {
+            let (client, _host_side) = UnixStream::pair().unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            Session::from_host(&def(), meta(), client, tx).unwrap()
+        };
+        s.mark_reattached();
+        // агент без хуков продолжает выводить текст: это работа, а не «запуск»
+        let sig = Signals { tail: "...", since_activity: Duration::from_millis(100), submitted: s.submitted };
+        assert_eq!(status::decide(s.status, &sig), Status::Working);
     }
 }

@@ -52,7 +52,7 @@ pub fn start_server(path: &PathBuf, tx: Sender<Msg>) -> Result<()> {
                 let session = v.get("session").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
                 let event = v.get("event").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let payload = v.get("payload").cloned().unwrap_or(Value::Null);
-                let _ = tx.send(Msg::Hook { session, event, payload });
+                let _ = tx.send(Msg::Hook { session, event, payload, replay: None });
             });
         }
     });
@@ -83,16 +83,20 @@ pub fn run_client(event: &str) {
 
 /// Отладка интеграций: `RADAR_HOOK_LOG=1 radar` пишет все события хуков в `~/.config/radar/hooks.log`.
 fn log_event(event: &str, input: &str) {
+    let session = std::env::var("RADAR_SESSION").unwrap_or_else(|_| "-".into());
+    let body: String = input.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
+    log_line(&format!("session={session} event={event} payload={body}"));
+}
+
+/// Строка в `hooks.log` (только при `RADAR_HOOK_LOG=1`): время, затем текст.
+pub fn log_line(text: &str) {
     if std::env::var_os("RADAR_HOOK_LOG").is_none() {
         return;
     }
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let session = std::env::var("RADAR_SESSION").unwrap_or_else(|_| "-".into());
-    let body: String = input.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(600).collect();
-    let line = format!("{secs} session={session} event={event} payload={body}\n");
     let _ = std::fs::create_dir_all(config_dir());
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(config_dir().join("hooks.log")) {
-        let _ = f.write_all(line.as_bytes());
+        let _ = f.write_all(format!("{secs} {text}\n").as_bytes());
     }
 }
 
